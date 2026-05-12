@@ -1,0 +1,5 @@
+id = "external.shared.policy.ext-policy"
+kind = "policy"
+title = "External Policy"
+privacy = "repo-safe"
+

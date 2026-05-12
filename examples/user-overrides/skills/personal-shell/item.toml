@@ -1,0 +1,5 @@
+id = "user.local.skill.personal-shell"
+kind = "skill"
+title = "Personal Shell"
+privacy = "repo-safe"
+

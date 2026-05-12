@@ -1,0 +1,12 @@
+[[repo]]
+id = "client-private"
+path = "repos/client-private"
+
+[[repo]]
+id = "client-tracked"
+path = "repos/client-tracked"
+
+[[repo]]
+id = "internal-app"
+path = "repos/internal-app"
+

@@ -1,0 +1,6 @@
+id = "shared-ext"
+url = "__EXTERNAL_SOURCE_URL__"
+commit = "__EXTERNAL_SOURCE_COMMIT__"
+namespace = "shared"
+trust_mode = "pinned-commit"
+

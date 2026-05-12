@@ -1,0 +1,5 @@
+id = "client-tracked"
+normalized_remotes = ["github.com/acme/client-tracked"]
+repo_class = "client"
+enabled_skills = ["corp.shadowknight.skill.shell-global"]
+

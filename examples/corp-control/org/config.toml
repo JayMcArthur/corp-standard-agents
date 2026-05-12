@@ -1,0 +1,8 @@
+id = "shadowknight"
+enabled_sources = ["shared-ext"]
+enabled_skills = ["corp.shadowknight.skill.shell-global"]
+baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+recommended_agent_types = ["shell"]
+minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+protected_fields = ["baseline_policies", "privacy_rules"]
+

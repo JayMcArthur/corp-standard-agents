@@ -1,0 +1,5 @@
+id = "corp.shadowknight.skill.platform-shared"
+kind = "skill"
+title = "Platform Shared"
+privacy = "repo-safe"
+

@@ -1,0 +1,6 @@
+id = "external.shared.skill.ext-review"
+kind = "skill"
+title = "External Review"
+privacy = "repo-safe"
+timeout_seconds = 30
+

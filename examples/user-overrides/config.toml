@@ -1,0 +1,4 @@
+id = "local"
+enabled_skills = ["user.local.skill.personal-shell"]
+preferred_agent_types = ["local-helper"]
+

@@ -1,0 +1,5 @@
+id = "client-private"
+normalized_remotes = ["github.com/acme/client-private"]
+repo_class = "client"
+enabled_skills = ["corp.shadowknight.skill.internal-ops"]
+

@@ -1,0 +1,4 @@
+[[source]]
+id = "shared-ext"
+path = "org/sources/shared-ext.toml"
+

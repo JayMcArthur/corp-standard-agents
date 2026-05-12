@@ -1,0 +1,2 @@
+Example upstream policy body.
+

@@ -1,0 +1,5 @@
+id = "corp.shadowknight.skill.shell-global"
+kind = "skill"
+title = "Shell Global"
+privacy = "repo-safe"
+

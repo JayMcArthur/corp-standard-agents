@@ -1,0 +1,7 @@
+id = "external.shared.skill.ext-review"
+kind = "skill"
+title = "External Review Override"
+privacy = "repo-safe"
+timeout_seconds = 99
+source_note = "corp replacement"
+

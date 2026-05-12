@@ -1,0 +1,5 @@
+id = "corp.shadowknight.skill.internal-ops"
+kind = "skill"
+title = "Internal Ops"
+privacy = "corp-private"
+
