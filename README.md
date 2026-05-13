@@ -14,12 +14,16 @@ That creates a local virtualenv and installs the `team-agents` CLI in editable m
 
 ```bash
 team-agents setup --corp-repo /path/to/corp-control --user-overrides /path/to/user-overrides
+team-agents setup --corp-repo /path/to/corp-control --user-overrides /path/to/user-overrides --workspace /path/to/repo --repo-id my-repo --repo-class internal --sync
 team-agents sync --workspace /path/to/repo
 team-agents sync --workspace /path/to/repo --dry-run
 team-agents status --workspace /path/to/repo --json
 team-agents doctor --workspace /path/to/repo
 team-agents init-corp-repo --dest /path/to/new-corp-control
 team-agents init-user-overrides --dest /path/to/new-user-overrides
+team-agents bootstrap-import --source ~/.agents/skills --dest ~/.team-agents-user
+team-agents promote-skills --from-layer user --to-layer org --all-imported
+team-agents add-source --layer org --source-id shared-ext --url /path/or/git/url --commit <sha> --namespace shared --enable
 ```
 
 ## Control Repo Shape
@@ -106,6 +110,72 @@ You can validate the full example flow with:
 
 ```bash
 bash scripts/check_example_flow.sh
+```
+
+## Local Onboarding
+
+The normal product path is the CLI, not a custom script. For a local workstation bootstrap that also imports existing Codex skills:
+
+```bash
+bash scripts/install_local.sh
+
+team-agents setup \
+  --corp-repo ~/.team-agents-corp \
+  --user-overrides ~/.team-agents-user \
+  --cache-root ~/.team-agents/cache \
+  --init-corp-if-missing \
+  --init-user-if-missing \
+  --import-skills-from ~/.agents/skills \
+  --import-skills-to user
+```
+
+If you also want first-run repo registration and initial generated output in one command:
+
+```bash
+team-agents setup \
+  --corp-repo ~/.team-agents-corp \
+  --user-overrides ~/.team-agents-user \
+  --cache-root ~/.team-agents/cache \
+  --init-corp-if-missing \
+  --init-user-if-missing \
+  --import-skills-from ~/.agents/skills \
+  --import-skills-to user \
+  --workspace /path/to/repo \
+  --repo-id my-repo \
+  --repo-class internal \
+  --add-and-enable-source repo shared-ext https://github.com/acme/native-skills.git <sha> shared \
+  --sync
+```
+
+That flow will:
+- use the locally installed CLI
+- scaffold `~/.team-agents-corp` if missing
+- scaffold `~/.team-agents-user` if missing
+- import non-system skills from `~/.agents/skills`
+- import them into `user`, `org`, or `repo`
+- import adjacent text resources as optional docs in the target layer
+- write `~/.team-agents/config.toml`
+- optionally register the current repo in the corp control repo
+- optionally register and enable native-format remote git sources
+- optionally run the first `sync`
+
+Recommended lifecycle:
+- bootstrap import into `user` first
+- promote shared skills into `org` or `repo`
+- leave only true personal preferences in `user`
+
+Example normalization step:
+
+```bash
+team-agents promote-skills --from-layer user --to-layer org --all-imported
+```
+
+`bootstrap-import` is intended as a first-run migration path. It is not the long-term source of truth. After import, the managed items live natively in your corp or user layers.
+
+The helper script is only a thin convenience wrapper around the same CLI flow:
+
+```bash
+bash scripts/setup_jay_local.sh
 ```
 
 ## License

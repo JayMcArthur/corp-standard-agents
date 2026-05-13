@@ -5,6 +5,7 @@ from pathlib import Path
 
 from team_agents.errors import ProtectionError, ResolutionError
 from team_agents.git_tools import ensure_git_exclude, has_tracked_prefix, is_tracked
+from team_agents.machine import load_machine_config
 from team_agents.models import ResolutionResult
 
 
@@ -16,13 +17,15 @@ def write_sync_output(result: ResolutionResult) -> list[Path]:
     workspace_root = result.workspace_context.git_root or result.workspace_context.workspace
     repo_class = result.workspace_context.repo_class or "internal"
     ensure_write_safety(result, workspace_root)
+    machine_config = load_machine_config()
+    tool_targets = resolve_tool_targets(machine_config.default_tool_target)
     agents_dir = workspace_root / ".agents"
     paths: list[Path] = []
     agents_dir.mkdir(parents=True, exist_ok=True)
     paths.append(write_index_md(result, agents_dir))
     paths.append(write_resolution_json(result, agents_dir))
     paths.extend(write_item_outputs(result, agents_dir, repo_class))
-    paths.append(write_agents_router(result, workspace_root, repo_class))
+    paths.extend(write_tool_routers(result, workspace_root, repo_class, tool_targets))
     return paths
 
 
@@ -32,12 +35,14 @@ def ensure_write_safety(result: ResolutionResult, workspace_root: Path) -> None:
         return
     if has_tracked_prefix(git_root, ".agents"):
         raise ProtectionError("Tracked .agents content already exists; refusing generated output")
-    agents_tracked = is_tracked(git_root, "AGENTS.md")
-    if result.workspace_context.repo_class == "client" and agents_tracked:
-        raise ResolutionError("Tracked AGENTS.md in a client repo blocks repo-local generated output")
+    tracked_router_names = tracked_router_files(git_root)
+    if result.workspace_context.repo_class == "client" and tracked_router_names:
+        names = ", ".join(tracked_router_names)
+        raise ResolutionError(f"Tracked router file(s) in a client repo block repo-local generated output: {names}")
     entries = ["/.agents/", ".agents/"]
-    if not agents_tracked:
-        entries.append("/AGENTS.md")
+    for router_name in ROUTER_FILES:
+        if router_name not in tracked_router_names:
+            entries.append(f"/{router_name}")
     ensure_git_exclude(git_root, entries)
 
 
@@ -114,8 +119,24 @@ def write_item_outputs(result: ResolutionResult, agents_dir: Path, repo_class: s
     return written
 
 
-def write_agents_router(result: ResolutionResult, workspace_root: Path, repo_class: str) -> Path:
-    path = workspace_root / "AGENTS.md"
+ROUTER_FILES = ("AGENTS.md", "CLAUDE.md")
+
+
+def write_tool_routers(
+    result: ResolutionResult,
+    workspace_root: Path,
+    repo_class: str,
+    tool_targets: list[str],
+) -> list[Path]:
+    paths: list[Path] = []
+    for target in tool_targets:
+        router_name = "AGENTS.md" if target == "codex" else "CLAUDE.md"
+        paths.append(write_router_file(result, workspace_root, repo_class, router_name))
+    return paths
+
+
+def write_router_file(result: ResolutionResult, workspace_root: Path, repo_class: str, router_name: str) -> Path:
+    path = workspace_root / router_name
     routing = build_routing_block(result)
     if path.exists():
         content = path.read_text(encoding="utf-8")
@@ -126,7 +147,7 @@ def write_agents_router(result: ResolutionResult, workspace_root: Path, repo_cla
             path.write_text(new_content, encoding="utf-8")
             return path
         if repo_class != "internal":
-            raise ResolutionError("Tracked AGENTS.md in a client repo cannot be updated")
+            raise ResolutionError(f"Tracked {router_name} in a client repo cannot be updated")
         new_content = content.rstrip() + "\n\n" + MANAGED_START + "\n" + routing + "\n" + MANAGED_END + "\n"
         path.write_text(new_content, encoding="utf-8")
         return path
@@ -145,3 +166,15 @@ def build_routing_block(result: ResolutionResult) -> str:
     if result.workspace_context.repo_class == "client":
         lines.append("- Corporate private operational material must not be pushed into this repo.")
     return "\n".join(lines)
+
+
+def resolve_tool_targets(default_tool_target: str) -> list[str]:
+    if default_tool_target == "all":
+        return ["codex", "claude"]
+    if default_tool_target in {"codex", "claude"}:
+        return [default_tool_target]
+    raise ResolutionError(f"Unsupported tool target {default_tool_target!r}")
+
+
+def tracked_router_files(git_root: Path) -> list[str]:
+    return [name for name in ROUTER_FILES if is_tracked(git_root, name)]

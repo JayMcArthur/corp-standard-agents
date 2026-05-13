@@ -10,7 +10,7 @@ class MachineConfig:
     corp_repo_path: Path
     user_override_path: Path
     cache_root: Path
-    default_tool_target: str = "codex"
+    default_tool_target: str = "all"
 
 
 @dataclass(slots=True)

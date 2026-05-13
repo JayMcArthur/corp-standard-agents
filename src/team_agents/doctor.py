@@ -8,7 +8,7 @@ from typing import Any
 from team_agents.errors import TeamAgentsError
 from team_agents.git_tools import find_git_root, has_tracked_prefix, is_tracked
 from team_agents.models import MachineConfig, ResolutionResult
-from team_agents.output import MANAGED_END, MANAGED_START
+from team_agents.output import MANAGED_END, MANAGED_START, ROUTER_FILES
 
 
 def run_doctor(
@@ -28,7 +28,7 @@ def run_doctor(
 
     add_check(
         "machine-config",
-        "ok" if machine_config.default_tool_target == "codex" else "warn",
+        "ok" if machine_config.default_tool_target in {"all", "codex", "claude"} else "warn",
         f"tool target is {machine_config.default_tool_target}",
     )
     add_check("corp-repo-path", "ok" if corp_root.exists() else "fail", str(corp_root))
@@ -53,18 +53,23 @@ def run_doctor(
             add_check("tracked-generated-content", "fail", "tracked .agents content blocks sync")
         else:
             add_check("tracked-generated-content", "ok", "no tracked .agents content")
-        agents_tracked = is_tracked(git_root, "AGENTS.md")
-        if agents_tracked:
-            add_check("tracked-agents-md", "warn", "tracked AGENTS.md exists")
-            path = git_root / "AGENTS.md"
-            if path.exists():
-                content = path.read_text(encoding="utf-8")
-                if MANAGED_START in content and MANAGED_END in content:
-                    add_check("managed-block", "ok", "AGENTS.md contains managed block markers")
-                else:
-                    add_check("managed-block", "warn", "AGENTS.md is tracked without managed block markers")
+        tracked_routers = [name for name in ROUTER_FILES if is_tracked(git_root, name)]
+        if tracked_routers:
+            add_check("tracked-router-files", "warn", f"tracked router files exist: {', '.join(tracked_routers)}")
+            for router_name in tracked_routers:
+                path = git_root / router_name
+                if path.exists():
+                    content = path.read_text(encoding="utf-8")
+                    if MANAGED_START in content and MANAGED_END in content:
+                        add_check(f"managed-block-{router_name}", "ok", f"{router_name} contains managed block markers")
+                    else:
+                        add_check(
+                            f"managed-block-{router_name}",
+                            "warn",
+                            f"{router_name} is tracked without managed block markers",
+                        )
         else:
-            add_check("tracked-agents-md", "ok", "AGENTS.md is untracked or absent")
+            add_check("tracked-router-files", "ok", "router files are untracked or absent")
 
     summary = {
         "ok": sum(1 for check in checks if check["status"] == "ok"),

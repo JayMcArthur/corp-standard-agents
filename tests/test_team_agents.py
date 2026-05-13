@@ -418,8 +418,10 @@ class TeamAgentsTests(unittest.TestCase):
         written = write_sync_output(result)
         self.assertTrue(any(path.name == "resolution.json" for path in written))
         agents_md = (self.internal_repo / "AGENTS.md").read_text(encoding="utf-8")
+        claude_md = (self.internal_repo / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("<!-- team-agents:start -->", agents_md)
         self.assertIn("Use the local generated context under `.agents/`.", agents_md)
+        self.assertIn("Use the local generated context under `.agents/`.", claude_md)
         self.assertTrue((self.internal_repo / ".agents" / "skills" / "ext-review" / "SKILL.md").exists())
         self.assertTrue((self.internal_repo / ".agents" / "skills" / "internal-ops" / "SKILL.md").exists())
         resolution = json.loads((self.internal_repo / ".agents" / "resolution.json").read_text(encoding="utf-8"))
@@ -644,6 +646,186 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(main(["init-user-overrides", "--dest", str(user_dest)]), 0)
         self.assertTrue((corp_dest / "org" / "config.toml").exists())
         self.assertTrue((user_dest / "config.toml").exists())
+
+    def test_setup_can_init_and_import_in_one_command(self) -> None:
+        corp_dest = self.root / "combo-corp"
+        user_dest = self.root / "combo-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--import-codex-skills-from",
+                str(self.root / "external-source"),  # no skills in native codex format, should still be safe
+            ]
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue((corp_dest / "org" / "config.toml").exists())
+        self.assertTrue((user_dest / "config.toml").exists())
+
+    def test_setup_can_register_and_sync_workspace(self) -> None:
+        corp_dest = self.root / "setup-corp"
+        user_dest = self.root / "setup-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--workspace",
+                str(self.internal_repo),
+                "--repo-id",
+                "setup-internal",
+                "--repo-class",
+                "internal",
+                "--sync",
+            ]
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue((corp_dest / "repos" / "setup-internal" / "config.toml").exists())
+        self.assertTrue((self.internal_repo / ".agents" / "index.md").exists())
+        self.assertTrue((self.internal_repo / "AGENTS.md").exists())
+        self.assertTrue((self.internal_repo / "CLAUDE.md").exists())
+
+    def test_setup_can_import_codex_skills_into_org_layer(self) -> None:
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
+        corp_dest = self.root / "import-corp"
+        user_dest = self.root / "import-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--import-codex-skills-from",
+                str(source_root),
+                "--import-codex-skills-to",
+                "org",
+            ]
+        )
+        self.assertEqual(result, 0)
+        org_config = (corp_dest / "org" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('corp.example-org.skill.reviewer', org_config)
+        self.assertTrue((corp_dest / "org" / "skills" / "reviewer" / "body.md").exists())
+
+    def test_setup_can_add_and_enable_repo_source(self) -> None:
+        corp_dest = self.root / "source-corp"
+        user_dest = self.root / "source-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--workspace",
+                str(self.internal_repo),
+                "--repo-id",
+                "source-internal",
+                "--repo-class",
+                "internal",
+                "--add-and-enable-source",
+                "repo",
+                "shared-second",
+                self.external_url,
+                self.external_commit,
+                "shared",
+            ]
+        )
+        self.assertEqual(result, 0)
+        manifest = corp_dest / "org" / "sources" / "shared-second.toml"
+        self.assertTrue(manifest.exists())
+        repo_config = (corp_dest / "repos" / "source-internal" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('enabled_sources = ["shared-second"]', repo_config)
+
+    def test_promote_skills_moves_bootstrapped_user_skill_to_org(self) -> None:
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer\n")
+        write(source_root / "reviewer" / "notes.md", "review notes")
+        corp_dest = self.root / "promote-corp"
+        user_dest = self.root / "promote-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--import-skills-from",
+                str(source_root),
+                "--import-skills-to",
+                "user",
+            ]
+        )
+        self.assertEqual(result, 0)
+        promote_result = main(
+            [
+                "promote-skills",
+                "--from-layer",
+                "user",
+                "--to-layer",
+                "org",
+                "--all-imported",
+            ]
+        )
+        self.assertEqual(promote_result, 0)
+        user_config = (user_dest / "config.toml").read_text(encoding="utf-8")
+        org_config = (corp_dest / "org" / "config.toml").read_text(encoding="utf-8")
+        self.assertNotIn("user.local.skill.reviewer", user_config)
+        self.assertIn("corp.example-org.skill.reviewer", org_config)
+        self.assertFalse((user_dest / "skills" / "reviewer").exists())
+        self.assertTrue((corp_dest / "org" / "skills" / "reviewer").exists())
+        body = (corp_dest / "org" / "skills" / "reviewer" / "body.md").read_text(encoding="utf-8")
+        self.assertIn("corp.example-org.doc.reviewer-notes-md", body)
+        doc_item = (corp_dest / "org" / "docs" / "reviewer-notes-md" / "item.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "corp.example-org.doc.reviewer-notes-md"', doc_item)
+
+    def test_register_repo_creates_mapping(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "register-repo",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--repo-id",
+                    "local-internal",
+                    "--repo-class",
+                    "internal",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        config_path = machine.corp_repo_path / "repos" / "local-internal" / "config.toml"
+        self.assertTrue(config_path.exists())
+        index_content = (machine.corp_repo_path / "indexes" / "repos.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "local-internal"', index_content)
 
 
 if __name__ == "__main__":

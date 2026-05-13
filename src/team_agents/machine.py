@@ -24,8 +24,10 @@ def load_machine_config(path: Path | None = None) -> MachineConfig:
         cache_root=Path(data["cache_root"]).expanduser().resolve(),
         default_tool_target=str(data["default_tool_target"]),
     )
-    if config.default_tool_target != "codex":
-        raise ValidationError(f"Unsupported default_tool_target {config.default_tool_target!r}; expected 'codex'")
+    if config.default_tool_target not in {"all", "codex", "claude"}:
+        raise ValidationError(
+            f"Unsupported default_tool_target {config.default_tool_target!r}; expected one of 'all', 'codex', 'claude'"
+        )
     return config
 
 
