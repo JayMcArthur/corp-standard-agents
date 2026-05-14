@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://team-agents.local/schemas/resolution-json-v1.schema.json",
+  "title": "team-agents resolution.json v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "workspace",
+    "git_root",
+    "normalized_remotes",
+    "matched_repo_id",
+    "matched_repo_group_id",
+    "binding_name",
+    "repo_class",
+    "layer_chain",
+    "applied_layers",
+    "enabled_sources",
+    "source_details",
+    "enabled_skills",
+    "active_policies",
+    "active_docs",
+    "recommended_agent_types",
+    "warnings",
+    "items",
+    "denied_items"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["v1"]
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "git_root": {
+      "type": ["string", "null"]
+    },
+    "normalized_remotes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "matched_repo_id": {
+      "type": ["string", "null"]
+    },
+    "matched_repo_group_id": {
+      "type": ["string", "null"]
+    },
+    "binding_name": {
+      "type": ["string", "null"]
+    },
+    "repo_class": {
+      "type": "string",
+      "enum": ["client", "internal", "unknown"]
+    },
+    "layer_chain": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["org", "repo-group", "repo", "user"]
+      },
+      "minItems": 1
+    },
+    "applied_layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer_name", "identifier"],
+        "properties": {
+          "layer_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "enabled_sources": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_details": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_type",
+          "namespace",
+          "commit",
+          "url",
+          "checkout_path",
+          "fingerprint",
+          "fingerprint_mode",
+          "trust_status"
+        ],
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "enum": ["corp", "external", "user"]
+          },
+          "namespace": {
+            "type": "string",
+            "minLength": 1
+          },
+          "commit": {
+            "type": "string",
+            "minLength": 7
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checkout_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fingerprint_mode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trust_status": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "enabled_skills": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "active_policies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "active_docs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "recommended_agent_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "items": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/resolvedItem"
+      }
+    },
+    "denied_items": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/resolvedItem"
+      }
+    }
+  },
+  "$defs": {
+    "replacedFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_type", "source_namespace", "source_ref"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_type": {
+          "type": "string",
+          "enum": ["corp", "external", "user"]
+        },
+        "source_namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "resolvedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "privacy",
+        "source_type",
+        "source_namespace",
+        "source_ref",
+        "slug",
+        "status",
+        "layer_name",
+        "activated_by",
+        "overridden_by",
+        "active"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["skill", "policy", "doc"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "privacy": {
+          "type": "string",
+          "enum": ["corp-private", "repo-safe"]
+        },
+        "source_type": {
+          "type": "string",
+          "enum": ["corp", "external", "user"]
+        },
+        "source_namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["direct", "replaced", "field-overridden"]
+        },
+        "layer_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "activated_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "overridden_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "replaced_from": {
+          "$ref": "#/$defs/replacedFrom"
+        },
+        "denied_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "recommended_agent_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["claude", "codex", "cursor"]
+          }
+        },
+        "claude_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor_globs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cursor_always_apply": {
+          "type": "boolean"
+        },
+        "policy_rules": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "body": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

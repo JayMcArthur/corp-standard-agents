@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from team_agents.toml_utils import read_toml, write_toml_document, write_simple_toml
@@ -15,6 +16,7 @@ def import_folder_skills(
     namespace: str,
     include_system: bool = False,
     privacy: str = "repo-safe",
+    replace_existing: bool = True,
 ) -> dict[str, int]:
     source_root = source_root.resolve()
     layer_root = layer_root.resolve()
@@ -27,6 +29,9 @@ def import_folder_skills(
     config_path = layer_root / "config.toml"
     existing = read_toml(config_path)
     existing_enabled = _str_list(existing.get("enabled_skills"))
+    if replace_existing:
+        removed_enabled = prune_managed_imports(layer_root, source_type=source_type, namespace=namespace)
+        existing_enabled = [item_id for item_id in existing_enabled if item_id not in removed_enabled]
 
     for skill_dir in sorted(path for path in source_root.iterdir() if path.is_dir()):
         if skill_dir.name == ".system" and not include_system:
@@ -97,6 +102,7 @@ def import_codex_skills(
     namespace: str,
     include_system: bool = False,
     privacy: str = "repo-safe",
+    replace_existing: bool = True,
 ) -> dict[str, int]:
     return import_folder_skills(
         source_root=source_root,
@@ -105,7 +111,31 @@ def import_codex_skills(
         namespace=namespace,
         include_system=include_system,
         privacy=privacy,
+        replace_existing=replace_existing,
     )
+
+
+def prune_managed_imports(layer_root: Path, source_type: str, namespace: str) -> set[str]:
+    removed_enabled: set[str] = set()
+    managed_prefix = f"{source_type}.{namespace}."
+    for folder in ("skills", "docs"):
+        base = layer_root / folder
+        if not base.exists():
+            continue
+        for item_dir in sorted(path for path in base.iterdir() if path.is_dir()):
+            item_path = item_dir / "item.toml"
+            if not item_path.exists():
+                continue
+            item = read_toml(item_path)
+            item_id = str(item.get("id", ""))
+            source_note = str(item.get("source_note", ""))
+            if not item_id.startswith(managed_prefix):
+                continue
+            if not source_note.startswith("Imported from "):
+                continue
+            shutil.rmtree(item_dir)
+            removed_enabled.add(item_id)
+    return removed_enabled
 
 
 def _ensure_layer_defaults(data: dict[str, object]) -> None:

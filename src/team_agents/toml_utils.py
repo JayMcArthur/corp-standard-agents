@@ -40,16 +40,21 @@ def write_simple_toml(path: Path, values: dict[str, Any]) -> None:
 
 def write_toml_document(path: Path, values: dict[str, Any]) -> None:
     lines: list[str] = []
+    table_lines: list[str] = []
     for key, value in values.items():
         if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
             for item in value:
-                lines.append(f"[[{key}]]")
+                table_lines.append(f"[[{key}]]")
                 for item_key, item_value in item.items():
-                    lines.append(f"{item_key} = {_toml_value(item_value)}")
-                lines.append("")
+                    table_lines.append(f"{item_key} = {_toml_value(item_value)}")
+                table_lines.append("")
             continue
         if isinstance(value, dict):
             raise ValueError(f"Nested TOML tables are not supported for key {key}")
         lines.append(f"{key} = {_toml_value(value)}")
+    if table_lines:
+        if lines:
+            lines.append("")
+        lines.extend(table_lines)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")

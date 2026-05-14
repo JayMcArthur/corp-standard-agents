@@ -53,7 +53,12 @@ def materialize_source(source: SourceDefinition, machine_config: MachineConfig) 
 
 
 def load_source_items(source: SourceDefinition, source_ref: SourceRef) -> dict[str, Item]:
-    items = load_items(source_ref.checkout_path, source_type=source.source_type, source_namespace=source.namespace)
+    items = load_items(
+        source_ref.checkout_path,
+        source_type=source.source_type,
+        source_namespace=source.namespace,
+        allow_native_source_formats=True,
+    )
     for item in items.values():
         item.source_namespace = source.namespace
         item.source_ref = source.commit

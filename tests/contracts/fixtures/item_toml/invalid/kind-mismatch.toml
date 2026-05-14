@@ -1,0 +1,4 @@
+id = "corp.example.policy.kind-mismatch"
+kind = "skill"
+title = "Kind Mismatch"
+privacy = "repo-safe"

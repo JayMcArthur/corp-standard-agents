@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from team_agents.errors import ValidationError
@@ -8,6 +9,9 @@ from team_agents.toml_utils import read_toml, write_simple_toml
 
 
 def machine_config_path() -> Path:
+    override = os.environ.get("TEAM_AGENTS_CONFIG")
+    if override:
+        return Path(override).expanduser().resolve()
     return Path.home() / ".team-agents" / "config.toml"
 
 
@@ -23,25 +27,26 @@ def load_machine_config(path: Path | None = None) -> MachineConfig:
         user_override_path=Path(data["user_override_path"]).expanduser().resolve(),
         cache_root=Path(data["cache_root"]).expanduser().resolve(),
         default_tool_target=str(data["default_tool_target"]),
+        user_name=str(data["user_name"]) if data.get("user_name") is not None else None,
     )
-    if config.default_tool_target not in {"all", "codex", "claude"}:
+    if config.default_tool_target not in {"all", "codex", "claude", "cursor"}:
         raise ValidationError(
-            f"Unsupported default_tool_target {config.default_tool_target!r}; expected one of 'all', 'codex', 'claude'"
+            f"Unsupported default_tool_target {config.default_tool_target!r}; expected one of 'all', 'codex', 'claude', 'cursor'"
         )
     return config
 
 
 def write_machine_config(config: MachineConfig, path: Path | None = None) -> Path:
     config_path = path or machine_config_path()
-    write_simple_toml(
-        config_path,
-        {
-            "corp_repo_path": str(config.corp_repo_path),
-            "user_override_path": str(config.user_override_path),
-            "cache_root": str(config.cache_root),
-            "default_tool_target": config.default_tool_target,
-        },
-    )
+    payload = {
+        "corp_repo_path": str(config.corp_repo_path),
+        "user_override_path": str(config.user_override_path),
+        "cache_root": str(config.cache_root),
+        "default_tool_target": config.default_tool_target,
+    }
+    if config.user_name is not None:
+        payload["user_name"] = config.user_name
+    write_simple_toml(config_path, payload)
     return config_path
 
 

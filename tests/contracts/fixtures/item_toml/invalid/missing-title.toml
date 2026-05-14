@@ -1,0 +1,3 @@
+id = "corp.example.skill.missing-title"
+kind = "skill"
+privacy = "repo-safe"

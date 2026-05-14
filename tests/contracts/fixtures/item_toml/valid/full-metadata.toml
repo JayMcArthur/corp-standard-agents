@@ -1,0 +1,13 @@
+id = "corp.example.skill.multi-tool"
+kind = "skill"
+title = "Multi Tool"
+privacy = "repo-safe"
+tags = ["core", "multi-tool"]
+recommended_agent_types = ["shell", "planner"]
+timeout_seconds = 45
+source_note = "Imported from fixture"
+source_ref = "fixtures/valid/full-metadata"
+target_tools = ["claude", "codex", "cursor"]
+claude_model = "opus"
+cursor_globs = ["src/**/*.py", "docs/**/*.md"]
+cursor_always_apply = true

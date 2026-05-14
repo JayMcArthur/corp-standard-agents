@@ -1,0 +1,9 @@
+---
+description: "Review changed application code"
+globs: ["src/**/*.py", "tests/**/*.py"]
+alwaysApply: true
+---
+
+# Cursor Reviewer
+
+Review changed application code.

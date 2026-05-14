@@ -1,0 +1,5 @@
+id = "corp.example.skill.unknown-field"
+kind = "skill"
+title = "Unknown Field"
+privacy = "repo-safe"
+made_up = "nope"

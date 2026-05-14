@@ -1,0 +1,4 @@
+id = "corp.example.skill.unknown-kind"
+kind = "widget"
+title = "Unknown Kind"
+privacy = "repo-safe"

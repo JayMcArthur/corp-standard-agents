@@ -9,8 +9,9 @@ from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 from pathlib import Path
 import hashlib
+from unittest.mock import patch
 
-from team_agents.cli import main
+from team_agents.cli import build_parser, main
 from team_agents.errors import ProtectionError, ResolutionError, ValidationError
 from team_agents.loaders import load_corp_repo, load_user_overrides
 from team_agents.machine import load_machine_config
@@ -404,11 +405,48 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         return load_machine_config()
 
+    def test_cli_no_longer_exposes_install_or_deploy_global(self) -> None:
+        parser = build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["install"])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["deploy-global"])
+
     def test_setup_writes_machine_config(self) -> None:
         config = self.configure_machine()
         self.assertEqual(config.corp_repo_path, self.corp_repo.resolve())
         self.assertEqual(config.user_override_path, self.user_overrides.resolve())
         self.assertTrue((self.home / ".team-agents" / "config.toml").exists())
+
+    def test_setup_leaves_unregistered_workspace_unmaterialized(self) -> None:
+        self.configure_machine()
+        self.assertFalse((self.unknown_repo / ".agents").exists())
+        self.assertFalse((self.unknown_repo / "AGENTS.md").exists())
+        self.assertFalse((self.unknown_repo / "CLAUDE.md").exists())
+
+    def test_context_command_outputs_resolution_json(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["context", "--workspace", str(self.unknown_repo), "--pretty"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["matched_repo_id"], None)
+        self.assertIn("corp.shadowknight.skill.shell-global", payload["enabled_skills"])
+        self.assertIn("user.local.skill.personal-shell", payload["enabled_skills"])
+
+    def test_audit_command_reports_item_provenance(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo)])
+        self.assertEqual(exit_code, 0)
+        report = stdout.getvalue()
+        self.assertIn("matched-repo: internal-app", report)
+        self.assertIn("external.shared.skill.ext-review: skill replaced via repo", report)
+        self.assertIn("corp.shadowknight.skill.internal-ops", report)
 
     def test_sync_internal_repo_writes_outputs_and_updates_agents(self) -> None:
         machine = self.configure_machine()
@@ -432,6 +470,31 @@ class TeamAgentsTests(unittest.TestCase):
         ext_lint = resolution["items"]["external.shared.skill.ext-lint"]
         self.assertEqual(ext_lint["timeout_seconds"], 77)
         self.assertIn("repo", ext_lint["overridden_by"])
+
+    def test_sync_installs_git_exclude_protection(self) -> None:
+        self.configure_machine()
+        self.assertEqual(main(["sync", "--workspace", str(self.internal_repo)]), 0)
+        exclude = (self.internal_repo / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+        self.assertIn("/.agents/", exclude)
+        self.assertIn("/CLAUDE.md", exclude)
+        self.assertIn("/.cursor/rules/team-agents.mdc", exclude)
+
+    def test_sync_wraps_plain_skill_bodies_in_valid_frontmatter(self) -> None:
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        result = resolve_workspace(self.unknown_repo, machine, corp, user)
+        write_sync_output(result)
+        shell_global = (self.unknown_repo / ".agents" / "skills" / "shell-global" / "SKILL.md").read_text(encoding="utf-8")
+        personal_shell = (
+            self.unknown_repo / ".agents" / "skills" / "personal-shell" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertTrue(shell_global.startswith("---\nname: "))
+        self.assertIn('description: "Shell global body"', shell_global)
+        self.assertIn("Shell global body", shell_global)
+        self.assertTrue(personal_shell.startswith("---\nname: "))
+        self.assertIn('description: "Personal shell body"', personal_shell)
+        self.assertIn("Personal shell body", personal_shell)
 
     def test_sync_client_repo_fails_on_corp_private_skill(self) -> None:
         machine = self.configure_machine()
@@ -492,11 +555,66 @@ class TeamAgentsTests(unittest.TestCase):
             enabled = false
             """,
         )
+        exit_code = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(self.corp_repo),
+                "--user-overrides",
+                str(self.user_overrides),
+                "--cache-root",
+                str(self.cache_root),
+            ]
+        )
+        self.assertEqual(exit_code, 1)
+
+    def test_resolution_json_records_activation_provenance_across_layers(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_overrides(machine.user_override_path)
-        with self.assertRaises(ResolutionError):
-            resolve_workspace(self.internal_repo, machine, corp, user)
+        payload = resolve_workspace(self.internal_repo, machine, corp, user).to_dict()
+        self.assertEqual(payload["items"]["corp.shadowknight.skill.shell-global"]["activated_by"], ["org:shadowknight"])
+        self.assertEqual(payload["items"]["corp.shadowknight.skill.platform-shared"]["activated_by"], ["repo-group:platform"])
+        self.assertEqual(payload["items"]["user.local.skill.personal-shell"]["activated_by"], ["user:local"])
+        self.assertEqual(payload["items"]["corp.shadowknight.policy.no-leaks"]["activated_by"], ["org:shadowknight"])
+
+    def test_user_layer_cannot_weaken_corp_private_item(self) -> None:
+        write(
+            self.user_overrides / "skills" / "internal-ops-replacement" / "item.toml",
+            """
+            id = "corp.shadowknight.skill.internal-ops"
+            kind = "skill"
+            title = "Weakened Internal Ops"
+            privacy = "repo-safe"
+            """,
+        )
+        write(
+            self.user_overrides / "skills" / "internal-ops-replacement" / "body.md",
+            "attempted weaker replacement",
+        )
+        write(
+            self.user_overrides / "config.toml",
+            """
+            id = "local"
+            enabled_skills = [
+              "user.local.skill.personal-shell",
+              "corp.shadowknight.skill.internal-ops"
+            ]
+            preferred_agent_types = ["local-helper"]
+            """,
+        )
+        exit_code = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(self.corp_repo),
+                "--user-overrides",
+                str(self.user_overrides),
+                "--cache-root",
+                str(self.cache_root),
+            ]
+        )
+        self.assertEqual(exit_code, 1)
 
     def test_sync_refuses_when_generated_agents_content_is_tracked(self) -> None:
         write(self.internal_repo / ".agents" / "index.md", "tracked")
@@ -540,6 +658,9 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("user.remote.skill.personal-remote", result.enabled_skills)
         cached_checkout = machine.cache_root / "sources" / "personal-remote-source" / self.personal_commit / "checkout"
         self.assertTrue(cached_checkout.exists())
+        library_link = self.home / ".team-agents" / "library" / "external" / f"personal-remote-source@{self.personal_commit}"
+        self.assertTrue(library_link.is_symlink())
+        self.assertEqual(library_link.resolve(), cached_checkout.resolve())
         trust_store = json.loads((machine.cache_root / "trust" / "sources.json").read_text(encoding="utf-8"))
         self.assertEqual(trust_store["sources"]["personal-remote-source"]["trust_mode"], "trust-on-first-use")
 
@@ -578,6 +699,56 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(report["summary"]["fail"], 1)
         tracked_check = next(check for check in report["checks"] if check["name"] == "tracked-generated-content")
         self.assertEqual(tracked_check["status"], "fail")
+
+    def test_doctor_json_reports_policy_compliance(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = [
+              "corp.shadowknight.policy.no-leaks",
+              "corp.shadowknight.policy.corp-compliance"
+            ]
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "policies" / "corp-compliance" / "item.toml",
+            """
+            id = "corp.shadowknight.policy.corp-compliance"
+            kind = "policy"
+            title = "Corp Compliance"
+            privacy = "repo-safe"
+            policy_rules = [
+              { rule = "user_overrides_must_be_git_backed", severity = "warn", remediation = "Put user overrides under git" },
+              { rule = "required_skill_ids", severity = "fail", skill_ids = ["corp.shadowknight.skill.missing"], remediation = "Enable the missing corp skill" },
+              { rule = "forbidden_source_patterns", severity = "warn", patterns = ["shared-ext"], remediation = "Disable the forbidden source" }
+            ]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "policies" / "corp-compliance" / "body.md",
+            "Structured compliance policy",
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 1)
+        report = json.loads(stdout.getvalue())
+        self.assertIn("policy_compliance", report)
+        entries = {entry["rule"]: entry for entry in report["policy_compliance"]}
+        self.assertEqual(entries["user_overrides_must_be_git_backed"]["severity"], "warn")
+        self.assertFalse(entries["user_overrides_must_be_git_backed"]["compliant"])
+        self.assertFalse(entries["required_skill_ids"]["compliant"])
+        self.assertIn("missing required skills", entries["required_skill_ids"]["detail"])
+        self.assertFalse(entries["forbidden_source_patterns"]["compliant"])
+        self.assertIn("remediation", entries["forbidden_source_patterns"])
 
     def test_client_resolution_json_does_not_inline_corp_private_bodies(self) -> None:
         write(
@@ -698,6 +869,16 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertTrue((self.internal_repo / "AGENTS.md").exists())
         self.assertTrue((self.internal_repo / "CLAUDE.md").exists())
 
+    def test_global_and_workspace_materialization_expose_same_skill(self) -> None:
+        self.configure_machine()
+        self.assertEqual(main(["sync", "--workspace", str(self.internal_repo)]), 0)
+        global_skill = (self.home / ".claude" / "skills" / "shell-global" / "SKILL.md").read_text(encoding="utf-8")
+        workspace_skill = (self.internal_repo / ".agents" / "skills" / "shell-global" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Shell global body", global_skill)
+        self.assertIn("Shell global body", workspace_skill)
+
     def test_setup_can_import_codex_skills_into_org_layer(self) -> None:
         source_root = self.root / "codex-skills"
         write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
@@ -724,6 +905,197 @@ class TeamAgentsTests(unittest.TestCase):
         org_config = (corp_dest / "org" / "config.toml").read_text(encoding="utf-8")
         self.assertIn('corp.example-org.skill.reviewer', org_config)
         self.assertTrue((corp_dest / "org" / "skills" / "reviewer" / "body.md").exists())
+
+    def test_setup_reimport_cleans_old_managed_skills(self) -> None:
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
+        corp_dest = self.root / "refresh-corp"
+        user_dest = self.root / "refresh-user"
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--init-corp-if-missing",
+                "--init-user-if-missing",
+                "--import-skills-from",
+                str(source_root),
+                "--import-skills-to",
+                "user",
+            ]
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue((user_dest / "skills" / "reviewer").exists())
+
+        (source_root / "reviewer" / "SKILL.md").unlink()
+        write(source_root / "linter" / "SKILL.md", "# Linter")
+        result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_dest),
+                "--user-overrides",
+                str(user_dest),
+                "--cache-root",
+                str(self.cache_root),
+                "--import-skills-from",
+                str(source_root),
+                "--import-skills-to",
+                "user",
+            ]
+        )
+        self.assertEqual(result, 0)
+        user_config = (user_dest / "config.toml").read_text(encoding="utf-8")
+        self.assertFalse((user_dest / "skills" / "reviewer").exists())
+        self.assertTrue((user_dest / "skills" / "linter").exists())
+        self.assertNotIn("user.local.skill.reviewer", user_config)
+        self.assertIn("user.local.skill.linter", user_config)
+
+    def test_refresh_personal_skills_command_reimports_from_machine_source(self) -> None:
+        machine = self.configure_machine()
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
+        result = main(["refresh-personal-skills", "--source", str(source_root)])
+        self.assertEqual(result, 0)
+        self.assertTrue((machine.user_override_path / "skills" / "reviewer").exists())
+
+        (source_root / "reviewer" / "SKILL.md").unlink()
+        write(source_root / "linter" / "SKILL.md", "# Linter")
+        result = main(["refresh-personal-skills", "--source", str(source_root)])
+        self.assertEqual(result, 0)
+        user_config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
+        self.assertFalse((machine.user_override_path / "skills" / "reviewer").exists())
+        self.assertTrue((machine.user_override_path / "skills" / "linter").exists())
+        self.assertNotIn("user.local.skill.reviewer", user_config)
+        self.assertIn("user.local.skill.linter", user_config)
+
+    def test_onboard_repo_registers_repo_group_and_syncs(self) -> None:
+        self.configure_machine()
+        fresh_repo = self.root / "workspace-new"
+        init_repo(fresh_repo, "https://github.com/acme/new-client.git")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "onboard-repo",
+                    "--workspace",
+                    str(fresh_repo),
+                    "--repo-id",
+                    "new-client",
+                    "--repo-class",
+                    "internal",
+                    "--repo-group-id",
+                    "platform",
+                    "--enable-skill",
+                    "corp.shadowknight.skill.platform-shared",
+                    "--enable-doc",
+                    "corp.shadowknight.doc.platform-map",
+                    "--recommended-agent-type",
+                    "planner",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["synced"])
+        config = (self.corp_repo / "repos" / "new-client" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('repo_group_id = "platform"', config)
+        self.assertIn('enabled_skills = ["corp.shadowknight.skill.platform-shared"]', config)
+        self.assertTrue((fresh_repo / ".agents" / "index.md").exists())
+
+    def test_onboard_repo_prompts_for_missing_values(self) -> None:
+        self.configure_machine()
+        fresh_repo = self.root / "workspace-prompted"
+        init_repo(fresh_repo, "https://github.com/acme/prompted-service.git")
+        answers = [
+            "",  # repo id -> derived default
+            "",  # repo class -> internal
+            "platform",
+            "corp.shadowknight.skill.platform-shared",
+            "",
+            "corp.shadowknight.doc.platform-map",
+            "planner",
+        ]
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=answers):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "onboard-repo",
+                        "--workspace",
+                        str(fresh_repo),
+                        "--json",
+                    ]
+                )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["repo_id"], "prompted-service")
+        self.assertEqual(payload["repo_group_id"], "platform")
+        self.assertIn("corp.shadowknight.skill.platform-shared", payload["enabled_skills"])
+        self.assertIn("corp.shadowknight.doc.platform-map", payload["docs"])
+        self.assertIn("planner", payload["recommended_agent_types"])
+        self.assertTrue((fresh_repo / ".agents" / "index.md").exists())
+
+    def test_bind_workspace_command_writes_binding_used_by_resolution(self) -> None:
+        machine = self.configure_machine()
+        bound = self.root / "bound-later"
+        bound.mkdir()
+        result = main(
+            [
+                "bind-workspace",
+                "--path",
+                str(bound),
+                "--name",
+                "bound-later",
+                "--repo-group-id",
+                "platform",
+            ]
+        )
+        self.assertEqual(result, 0)
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(bound, machine, corp, user)
+        self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
+        self.assertIn("corp.shadowknight.skill.platform-shared", resolution.enabled_skills)
+        self.assertTrue((bound / ".agents" / "resolution.json").exists())
+
+    def test_bind_workspace_prompts_for_missing_values(self) -> None:
+        machine = self.configure_machine()
+        bound = self.root / "bound-prompted"
+        bound.mkdir()
+        answers = [
+            "",  # binding name -> default path name
+            "",  # target kind -> repo-group
+            "platform",
+        ]
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=answers):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "bind-workspace",
+                        "--path",
+                        str(bound),
+                        "--json",
+                    ]
+                )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "bound-prompted")
+        self.assertEqual(payload["repo_group_id"], "platform")
+        self.assertTrue(payload["synced"])
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(bound, machine, corp, user)
+        self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
+        self.assertTrue((bound / ".agents" / "resolution.json").exists())
 
     def test_setup_can_add_and_enable_repo_source(self) -> None:
         corp_dest = self.root / "source-corp"
@@ -826,6 +1198,130 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertTrue(config_path.exists())
         index_content = (machine.corp_repo_path / "indexes" / "repos.toml").read_text(encoding="utf-8")
         self.assertIn('id = "local-internal"', index_content)
+
+    def test_migrate_user_overrides_moves_legacy_tree_and_is_idempotent(self) -> None:
+        legacy_root = self.home / ".team-agents-user"
+        write(
+            legacy_root / "config.toml",
+            """
+            id = "legacy"
+            enabled_skills = ["user.legacy.skill.legacy-review"]
+            """,
+        )
+        write(
+            legacy_root / "skills" / "legacy-review" / "item.toml",
+            """
+            id = "user.legacy.skill.legacy-review"
+            kind = "skill"
+            title = "Legacy Review"
+            privacy = "repo-safe"
+            """,
+        )
+        write(legacy_root / "skills" / "legacy-review" / "body.md", "legacy review body")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            result = main(
+                [
+                    "migrate-user-overrides",
+                    "--user",
+                    "legacy",
+                    "--corp-repo",
+                    str(self.corp_repo),
+                    "--cache-root",
+                    str(self.cache_root),
+                    "--json",
+                ]
+            )
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        migrated_skill = self.corp_repo / "users" / "legacy" / "skills" / "legacy-review" / "body.md"
+        self.assertTrue(migrated_skill.exists())
+        self.assertTrue(payload["moved"])
+        self.assertTrue((self.cache_root / "logs" / "migrations" / "migrate-user-overrides-legacy.json").exists())
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            result = main(
+                [
+                    "migrate-user-overrides",
+                    "--user",
+                    "legacy",
+                    "--corp-repo",
+                    str(self.corp_repo),
+                    "--cache-root",
+                    str(self.cache_root),
+                    "--json",
+                ]
+            )
+        self.assertEqual(result, 0)
+        rerun = json.loads(stdout.getvalue())
+        self.assertTrue(rerun["skipped"])
+
+        setup_result = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(self.corp_repo),
+                "--user",
+                "legacy",
+                "--cache-root",
+                str(self.cache_root),
+            ]
+        )
+        self.assertEqual(setup_result, 0)
+        global_skill = (self.home / ".claude" / "skills" / "legacy-review" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("legacy review body", global_skill)
+
+    def test_update_refreshes_user_global_and_recent_workspace_outputs(self) -> None:
+        git(self.corp_repo, "init")
+        git(self.corp_repo, "config", "user.email", "test@example.com")
+        git(self.corp_repo, "config", "user.name", "Test User")
+        git(self.corp_repo, "add", ".")
+        git(self.corp_repo, "commit", "-m", "corp init")
+        corp_remote = self.root / "corp-remote.git"
+        subprocess.run(["git", "init", "--bare", str(corp_remote)], check=True, capture_output=True, text=True)
+        git(self.corp_repo, "remote", "add", "origin", str(corp_remote))
+        git(self.corp_repo, "push", "-u", "origin", "HEAD")
+        corp_clone = self.root / "corp-clone"
+        subprocess.run(["git", "clone", str(corp_remote), str(corp_clone)], check=True, capture_output=True, text=True)
+
+        exit_code = main(
+            [
+                "setup",
+                "--corp-repo",
+                str(corp_clone),
+                "--user-overrides",
+                str(self.user_overrides),
+                "--cache-root",
+                str(self.cache_root),
+            ]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(main(["sync", "--workspace", str(self.internal_repo)]), 0)
+        global_skill_path = self.home / ".claude" / "skills" / "shell-global" / "SKILL.md"
+        self.assertIn("Shell global body", global_skill_path.read_text(encoding="utf-8"))
+
+        write(self.corp_repo / "org" / "skills" / "shell-global" / "body.md", "Updated shell global body")
+        git(self.corp_repo, "add", "org/skills/shell-global/body.md")
+        git(self.corp_repo, "commit", "-m", "update shell global")
+        git(self.corp_repo, "push")
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["update", "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertIn("corp_before_commit", payload)
+        self.assertIn("corp_after_commit", payload)
+        self.assertTrue((self.cache_root / "logs" / "update.json").exists())
+        self.assertIn("Updated shell global body", global_skill_path.read_text(encoding="utf-8"))
+        workspace_skill = (self.internal_repo / ".agents" / "skills" / "shell-global" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Updated shell global body", workspace_skill)
 
 
 if __name__ == "__main__":

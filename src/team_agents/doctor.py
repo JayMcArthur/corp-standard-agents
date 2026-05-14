@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ def run_doctor(
 
     add_check(
         "machine-config",
-        "ok" if machine_config.default_tool_target in {"all", "codex", "claude"} else "warn",
+        "ok" if machine_config.default_tool_target in {"all", "codex", "claude", "cursor"} else "warn",
         f"tool target is {machine_config.default_tool_target}",
     )
     add_check("corp-repo-path", "ok" if corp_root.exists() else "fail", str(corp_root))
@@ -76,6 +77,12 @@ def run_doctor(
         "warn": sum(1 for check in checks if check["status"] == "warn"),
         "fail": sum(1 for check in checks if check["status"] == "fail"),
     }
+    policy_compliance: list[dict[str, Any]] = []
+    if resolution is not None:
+        policy_compliance = evaluate_policy_compliance(machine_config, user_root, resolution)
+        for entry in policy_compliance:
+            status = "ok" if entry["compliant"] else entry["severity"]
+            summary[status] += 1
 
     result: dict[str, Any] = {
         "machine_config": {
@@ -90,6 +97,7 @@ def run_doctor(
         },
         "summary": summary,
         "checks": checks,
+        "policy_compliance": policy_compliance,
     }
     if resolution is not None:
         result["resolution"] = {
@@ -153,8 +161,107 @@ def doctor_text(report: dict[str, Any]) -> str:
         )
         if resolution["denied_items"]:
             lines.append(f"denied-items: {', '.join(f'{key} ({value})' for key, value in resolution['denied_items'].items())}")
+    if report.get("policy_compliance"):
+        lines.extend(["", "policy-compliance:"])
+        for entry in report["policy_compliance"]:
+            status = "ok" if entry["compliant"] else entry["severity"]
+            lines.append(
+                f"- [{status}] {entry['policy_id']}::{entry['rule']}: {entry['detail']} (remediation: {entry['remediation']})"
+            )
     return "\n".join(lines)
 
 
 def doctor_json(report: dict[str, Any]) -> str:
     return json.dumps(report, indent=2, sort_keys=True)
+
+
+def evaluate_policy_compliance(
+    machine_config: MachineConfig,
+    user_root: Path,
+    resolution: ResolutionResult,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for policy_id in resolution.active_policies:
+        resolved = resolution.items.get(policy_id)
+        if resolved is None or not resolved.item.policy_rules:
+            continue
+        for rule in resolved.item.policy_rules:
+            entries.append(
+                evaluate_policy_rule(
+                    policy_id=policy_id,
+                    policy_title=resolved.item.title,
+                    rule=rule,
+                    machine_config=machine_config,
+                    user_root=user_root,
+                    resolution=resolution,
+                )
+            )
+    return entries
+
+
+def evaluate_policy_rule(
+    *,
+    policy_id: str,
+    policy_title: str,
+    rule: dict[str, Any],
+    machine_config: MachineConfig,
+    user_root: Path,
+    resolution: ResolutionResult,
+) -> dict[str, Any]:
+    rule_name = str(rule["rule"])
+    severity = str(rule.get("severity") or "fail")
+    remediation = str(rule.get("remediation") or default_policy_remediation(rule_name))
+    compliant = True
+    detail = "compliant"
+
+    if rule_name == "user_overrides_must_be_git_backed":
+        compliant = (user_root / ".git").exists()
+        detail = "user override repo is git-backed" if compliant else f"user override path is not git-backed: {user_root}"
+    elif rule_name == "required_skill_ids":
+        required = [str(item) for item in rule.get("skill_ids", [])]
+        missing = [item for item in required if item not in resolution.enabled_skills]
+        compliant = not missing
+        detail = "all required skills are active" if compliant else f"missing required skills: {', '.join(missing)}"
+    elif rule_name == "forbidden_source_patterns":
+        patterns = [str(item) for item in rule.get("patterns", [])]
+        matches = find_forbidden_source_matches(patterns, resolution)
+        compliant = not matches
+        detail = "no forbidden source patterns matched" if compliant else f"forbidden sources matched: {', '.join(matches)}"
+    else:
+        compliant = False
+        detail = f"unsupported policy rule: {rule_name}"
+
+    return {
+        "policy_id": policy_id,
+        "policy_title": policy_title,
+        "rule": rule_name,
+        "severity": severity,
+        "compliant": compliant,
+        "detail": detail,
+        "remediation": remediation,
+    }
+
+
+def default_policy_remediation(rule_name: str) -> str:
+    defaults = {
+        "user_overrides_must_be_git_backed": "move user overrides into a git-backed repo or initialize git at the configured user override path",
+        "required_skill_ids": "enable the required skills in the appropriate layer config",
+        "forbidden_source_patterns": "remove the matching source or change the corp policy definition",
+    }
+    return defaults.get(rule_name, "review the corp policy definition")
+
+
+def find_forbidden_source_matches(patterns: list[str], resolution: ResolutionResult) -> list[str]:
+    matches: list[str] = []
+    for pattern in patterns:
+        compiled = re.compile(pattern)
+        for source_id in resolution.enabled_sources:
+            detail = resolution.source_details.get(source_id)
+            candidates = [source_id]
+            if detail is not None:
+                candidates.append(detail.url)
+            if any(compiled.search(candidate) for candidate in candidates):
+                match = f"{source_id} ({pattern})"
+                if match not in matches:
+                    matches.append(match)
+    return matches

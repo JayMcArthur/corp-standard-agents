@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://team-agents.local/schemas/item-toml-v1.schema.json",
+  "title": "team-agents item.toml v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "title", "privacy"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(skill|policy|doc)\\.([a-z0-9][a-z0-9_-]*)$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["skill", "policy", "doc"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "privacy": {
+      "type": "string",
+      "enum": ["corp-private", "repo-safe"]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "recommended_agent_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["claude", "codex", "cursor"]
+      }
+    },
+    "claude_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cursor_globs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "cursor_always_apply": {
+      "type": "boolean"
+    },
+    "policy_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule"],
+        "properties": {
+          "rule": {
+            "type": "string",
+            "enum": [
+              "user_overrides_must_be_git_backed",
+              "required_skill_ids",
+              "forbidden_source_patterns"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["warn", "fail"]
+          },
+          "remediation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

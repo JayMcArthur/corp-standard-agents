@@ -8,7 +8,7 @@ Create starter scaffolds:
 
 ```bash
 team-agents init-corp-repo --dest /path/to/corp-control
-team-agents init-user-overrides --dest /path/to/user-overrides
+team-agents setup --corp-repo /path/to/corp-control --user alice
 ```
 
 Then edit the generated files to match your org, repos, sources, and privacy rules.
@@ -37,16 +37,23 @@ corp-agent-control/
       skills/
       policies/
       docs/
+  users/
+    <username>/
+      config.toml
+      skills/
+      policies/
+      docs/
+      sources/
   indexes/
     repos.toml
     repo-groups.toml
     sources.toml
 ```
 
-User overrides:
+Corp-resident user profile:
 
 ```text
-user-overrides/
+corp-agent-control/users/<username>/
   config.toml
   skills/
   policies/
@@ -88,7 +95,7 @@ Examples:
 - may define `repo_group_id`
 - `repo_class` must be `client` or `internal`
 
-User `config.toml`
+User profile `config.toml`
 - may define personal skills, personal sources, optional policies/docs, preferred agent types, and workspace bindings
 - may not define `baseline_policies`
 - may not define `repo_class`, `repo_group_id`, or `normalized_remotes` at top level
@@ -158,3 +165,34 @@ You can also preview a resolution without writing generated files:
 ```bash
 team-agents sync --workspace /path/to/repo --dry-run
 ```
+
+## Structured Policy Rules
+
+Policy items may optionally declare structured `policy_rules` in `item.toml`.
+
+Example:
+
+```toml
+policy_rules = [
+  { rule = "required_skill_ids", severity = "fail", skill_ids = ["corp.shadowknight.skill.shell-global"], remediation = "Enable the shell-global skill in org/config.toml" },
+  { rule = "user_overrides_must_be_git_backed", severity = "warn" }
+]
+```
+
+Current supported rules:
+- `user_overrides_must_be_git_backed`
+- `required_skill_ids`
+- `forbidden_source_patterns`
+
+Use `team-agents doctor --json` to inspect per-policy compliance entries with severity, detail, and remediation.
+
+## Native Source Inputs
+
+External sources may be authored in any of these shapes:
+- team-agents native: `<slug>/item.toml` + `<slug>/body.md`
+- Claude native: `<slug>/SKILL.md` with frontmatter
+- Cursor native: `.cursor/rules/<slug>.mdc` with frontmatter
+
+Current native metadata mappings:
+- Claude native: `name`, `description`, optional `model`, optional `tools`
+- Cursor native: `description`, optional `globs`, optional `alwaysApply`

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from team_agents.errors import ProtectionError, ResolutionError
 from team_agents.git_tools import ensure_git_exclude, has_tracked_prefix, is_tracked
 from team_agents.machine import load_machine_config
-from team_agents.models import ResolutionResult
+from team_agents.models import Item, ResolutionResult
+from team_agents.resolution_schema import validate_resolution_json
 
 
 MANAGED_START = "<!-- team-agents:start -->"
 MANAGED_END = "<!-- team-agents:end -->"
+ROUTER_TARGETS = {
+    "codex": "AGENTS.md",
+    "claude": "CLAUDE.md",
+    "cursor": ".cursor/rules/team-agents.mdc",
+}
+ROUTER_FILES = tuple(ROUTER_TARGETS.values())
 
 
 def write_sync_output(result: ResolutionResult) -> list[Path]:
@@ -35,13 +43,9 @@ def ensure_write_safety(result: ResolutionResult, workspace_root: Path) -> None:
         return
     if has_tracked_prefix(git_root, ".agents"):
         raise ProtectionError("Tracked .agents content already exists; refusing generated output")
-    tracked_router_names = tracked_router_files(git_root)
-    if result.workspace_context.repo_class == "client" and tracked_router_names:
-        names = ", ".join(tracked_router_names)
-        raise ResolutionError(f"Tracked router file(s) in a client repo block repo-local generated output: {names}")
     entries = ["/.agents/", ".agents/"]
     for router_name in ROUTER_FILES:
-        if router_name not in tracked_router_names:
+        if router_name not in tracked_router_files(git_root):
             entries.append(f"/{router_name}")
     ensure_git_exclude(git_root, entries)
 
@@ -98,7 +102,9 @@ def write_index_md(result: ResolutionResult, agents_dir: Path) -> Path:
 
 def write_resolution_json(result: ResolutionResult, agents_dir: Path) -> Path:
     path = agents_dir / "resolution.json"
-    path.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = result.to_dict()
+    validate_resolution_json(payload)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -114,12 +120,64 @@ def write_item_outputs(result: ResolutionResult, agents_dir: Path, repo_class: s
         else:
             path = agents_dir / "docs" / f"{resolved.item.slug}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(resolved.item.body, encoding="utf-8")
+        content = render_output_body(resolved.item)
+        path.write_text(content, encoding="utf-8")
         written.append(path)
     return written
 
 
-ROUTER_FILES = ("AGENTS.md", "CLAUDE.md")
+def render_output_body(item: Item) -> str:
+    if item.kind != "skill":
+        return item.body
+    return render_skill_markdown(item)
+
+
+def render_skill_markdown(item: Item) -> str:
+    metadata, body = split_frontmatter(item.body)
+    name = str(metadata.get("name") or item.slug)
+    description = str(metadata.get("description") or infer_skill_description(body, item))
+    lines = [
+        "---",
+        f"name: {yaml_scalar(name)}",
+        f"description: {yaml_scalar(description)}",
+        "---",
+        "",
+        body.strip(),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def split_frontmatter(body: str) -> tuple[dict[str, str], str]:
+    if not body.startswith("---\n"):
+        return {}, body
+    end_marker = "\n---\n"
+    end_index = body.find(end_marker, 4)
+    if end_index == -1:
+        return {}, body
+    raw_metadata = body[4:end_index]
+    content = body[end_index + len(end_marker) :]
+    metadata: dict[str, str] = {}
+    for line in raw_metadata.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        metadata[key.strip()] = value.strip().strip("'\"")
+    return metadata, content
+
+
+def infer_skill_description(body: str, item: Item) -> str:
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("- ") or line.startswith("```") or line.startswith("`"):
+            continue
+        compact = re.sub(r"\s+", " ", line)
+        return compact[:280]
+    return f"Generated skill for {item.title}."
+
+
+def yaml_scalar(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def write_tool_routers(
@@ -130,7 +188,7 @@ def write_tool_routers(
 ) -> list[Path]:
     paths: list[Path] = []
     for target in tool_targets:
-        router_name = "AGENTS.md" if target == "codex" else "CLAUDE.md"
+        router_name = ROUTER_TARGETS[target]
         paths.append(write_router_file(result, workspace_root, repo_class, router_name))
     return paths
 
@@ -149,8 +207,10 @@ def write_router_file(result: ResolutionResult, workspace_root: Path, repo_class
         if repo_class != "internal":
             raise ResolutionError(f"Tracked {router_name} in a client repo cannot be updated")
         new_content = content.rstrip() + "\n\n" + MANAGED_START + "\n" + routing + "\n" + MANAGED_END + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new_content, encoding="utf-8")
         return path
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(routing + "\n", encoding="utf-8")
     return path
 
@@ -170,8 +230,8 @@ def build_routing_block(result: ResolutionResult) -> str:
 
 def resolve_tool_targets(default_tool_target: str) -> list[str]:
     if default_tool_target == "all":
-        return ["codex", "claude"]
-    if default_tool_target in {"codex", "claude"}:
+        return ["codex", "claude", "cursor"]
+    if default_tool_target in {"codex", "claude", "cursor"}:
         return [default_tool_target]
     raise ResolutionError(f"Unsupported tool target {default_tool_target!r}")
 

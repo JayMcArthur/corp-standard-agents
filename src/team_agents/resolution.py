@@ -75,10 +75,11 @@ def resolve_workspace(
     layers = select_layers(context, corp, user)
     enabled_sources = merge_sources(layers)
     resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
-    enabled_skills = merge_set_fields(layers, "enabled_skills", "disabled_skills")
-    optional_policies = merge_set_fields(layers, "optional_policies", "disabled_optional_policies")
-    docs = merge_set_fields(layers, "docs", "disabled_docs")
+    enabled_skills, skill_activations = merge_set_fields(layers, "enabled_skills", "disabled_skills")
+    optional_policies, policy_activations = merge_set_fields(layers, "optional_policies", "disabled_optional_policies")
+    docs, doc_activations = merge_set_fields(layers, "docs", "disabled_docs")
     baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
+    baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
     if context.is_unknown:
         user_layer = user.layer.config
         enabled_skills = (set(corp.org.config.minimal_enabled_skills) | set(user_layer.enabled_skills)) - set(user_layer.disabled_skills)
@@ -86,9 +87,37 @@ def resolve_workspace(
             user_layer.disabled_optional_policies
         )
         docs = (set(corp.org.config.minimal_docs) | set(user_layer.docs)) - set(user_layer.disabled_docs)
+        skill_activations = activation_map_for_unknown(
+            corp.org.config.minimal_enabled_skills,
+            user_layer.enabled_skills,
+            user_layer.disabled_skills,
+            corp.org.config,
+            user_layer,
+        )
+        policy_activations = activation_map_for_unknown(
+            corp.org.config.minimal_optional_policies,
+            user_layer.optional_policies,
+            user_layer.disabled_optional_policies,
+            corp.org.config,
+            user_layer,
+        )
+        doc_activations = activation_map_for_unknown(
+            corp.org.config.minimal_docs,
+            user_layer.docs,
+            user_layer.disabled_docs,
+            corp.org.config,
+            user_layer,
+        )
     active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
     recommended_agent_types = merge_recommended_agent_types(layers, unknown_only=context.is_unknown)
     active_ids = set(enabled_skills) | set(active_policy_ids) | set(docs)
+    activation_map: dict[str, list[str]] = {}
+    for mapping in [skill_activations, policy_activations, doc_activations, baseline_policy_activations]:
+        for item_id, refs in mapping.items():
+            activation_map.setdefault(item_id, [])
+            for ref in refs:
+                if ref not in activation_map[item_id]:
+                    activation_map[item_id].append(ref)
     active_items: dict[str, ResolvedItem] = {}
     denied_items: dict[str, ResolvedItem] = {}
     warnings: list[str] = []
@@ -98,15 +127,18 @@ def resolve_workspace(
             raise ResolutionError(f"Missing referenced item: {item_id}")
         apply_enabled_override(resolved, layers)
         if not resolved.active:
+            resolved.activated_by = activation_map.get(item_id, [])
             denied_items[item_id] = resolved
             continue
         denial = evaluate_item_eligibility(context, resolved, item_id in baseline_policies)
         if denial:
             resolved.denied_reason = denial
+            resolved.activated_by = activation_map.get(item_id, [])
             denied_items[item_id] = resolved
             if resolved.item.kind in {"skill", "policy", "doc"}:
                 raise ResolutionError(f"{item_id} is not allowed in this workspace: {denial}")
             continue
+        resolved.activated_by = activation_map.get(item_id, [])
         active_items[item_id] = resolved
     for item_id, resolved in resolved_items.items():
         if item_id not in active_ids and resolved.denied_reason:
@@ -123,6 +155,11 @@ def resolve_workspace(
         warnings.append("User protected field overlap ignored")
     return ResolutionResult(
         workspace_context=context,
+        layer_chain=["org", "repo-group", "repo", "user"],
+        applied_layers=[
+            {"layer_name": layer.config.layer_name, "identifier": layer.config.identifier}
+            for layer in layers
+        ],
         enabled_sources=enabled_sources,
         source_details=source_details,
         enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
@@ -162,15 +199,21 @@ def merge_sources(layers: list[LayerData]) -> list[str]:
     return [source_id for source_id in enabled if source_id not in disabled]
 
 
-def merge_set_fields(layers: list[LayerData], enabled_field: str, disabled_field: str) -> set[str]:
+def merge_set_fields(layers: list[LayerData], enabled_field: str, disabled_field: str) -> tuple[set[str], dict[str, list[str]]]:
     enabled: list[str] = []
     disabled: set[str] = set()
+    activations: dict[str, list[str]] = {}
     for layer in layers:
         for item_id in getattr(layer.config, enabled_field):
             if item_id not in enabled:
                 enabled.append(item_id)
+            activations.setdefault(item_id, [])
+            ref = layer_ref(layer.config)
+            if ref not in activations[item_id]:
+                activations[item_id].append(ref)
         disabled.update(getattr(layer.config, disabled_field))
-    return {item_id for item_id in enabled if item_id not in disabled}
+    filtered = {item_id for item_id in enabled if item_id not in disabled}
+    return filtered, {item_id: refs for item_id, refs in activations.items() if item_id in filtered}
 
 
 def merge_recommended_agent_types(layers: list[LayerData], unknown_only: bool) -> list[str]:
@@ -183,6 +226,31 @@ def merge_recommended_agent_types(layers: list[LayerData], unknown_only: bool) -
             if agent_type not in values:
                 values.append(agent_type)
     return values
+
+
+def activation_map_for_unknown(
+    org_values: list[str],
+    user_values: list[str],
+    user_disabled: list[str],
+    org_config: LayerConfig,
+    user_config: LayerConfig,
+) -> dict[str, list[str]]:
+    refs: dict[str, list[str]] = {}
+    for item_id in org_values:
+        refs.setdefault(item_id, []).append(layer_ref(org_config))
+    for item_id in user_values:
+        refs.setdefault(item_id, [])
+        user_ref = layer_ref(user_config)
+        if user_ref not in refs[item_id]:
+            refs[item_id].append(user_ref)
+    for item_id in list(refs):
+        if item_id in user_disabled:
+            refs.pop(item_id, None)
+    return refs
+
+
+def layer_ref(config: LayerConfig) -> str:
+    return f"{config.layer_name}:{config.identifier}"
 
 
 def gather_items(
@@ -208,6 +276,7 @@ def gather_items(
         for item_id, item in layer.items.items():
             if item_id in layered_items:
                 replaced = layered_items[item_id]
+                validate_layer_replacement(layer, replaced, item, corp)
                 layered_items[item_id] = ResolvedItem(
                     item=deepcopy(item),
                     layer_name=layer.config.layer_name,
@@ -260,6 +329,19 @@ def evaluate_item_eligibility(context: WorkspaceContext, resolved: ResolvedItem,
     if is_baseline_policy and not resolved.active:
         return "baseline policies are protected"
     return None
+
+
+def validate_layer_replacement(layer: LayerData, replaced: ResolvedItem, replacement: Item, corp: CorpRepo) -> None:
+    if layer.config.layer_name != "user":
+        return
+    if replaced.item.item_id in corp.org.config.baseline_policies:
+        raise ResolutionError(f"User layer may not replace baseline policy {replaced.item.item_id}")
+    if privacy_rank(replacement.privacy) < privacy_rank(replaced.item.privacy):
+        raise ResolutionError(f"User layer may not weaken privacy for {replaced.item.item_id}")
+
+
+def privacy_rank(privacy: str) -> int:
+    return {"repo-safe": 0, "corp-private": 1}[privacy]
 
 
 def match_workspace_binding(path: Path, bindings: list[WorkspaceBinding]) -> WorkspaceBinding | None:

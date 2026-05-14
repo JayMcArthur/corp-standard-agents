@@ -11,6 +11,7 @@ class MachineConfig:
     user_override_path: Path
     cache_root: Path
     default_tool_target: str = "all"
+    user_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -99,6 +100,11 @@ class Item:
     recommended_agent_types: list[str] = field(default_factory=list)
     timeout_seconds: int | None = None
     source_note: str | None = None
+    target_tools: list[str] = field(default_factory=list)
+    claude_model: str | None = None
+    cursor_globs: list[str] = field(default_factory=list)
+    cursor_always_apply: bool | None = None
+    policy_rules: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -142,6 +148,7 @@ class ResolvedItem:
     item: Item
     layer_name: str
     status: str
+    activated_by: list[str] = field(default_factory=list)
     overridden_by: list[str] = field(default_factory=list)
     replaced_from: dict[str, str] | None = None
     denied_reason: str | None = None
@@ -159,6 +166,7 @@ class ResolvedItem:
             "slug": self.item.slug,
             "status": self.status,
             "layer_name": self.layer_name,
+            "activated_by": self.activated_by,
             "overridden_by": self.overridden_by,
             "active": self.active,
         }
@@ -174,6 +182,16 @@ class ResolvedItem:
             data["timeout_seconds"] = self.item.timeout_seconds
         if self.item.source_note:
             data["source_note"] = self.item.source_note
+        if self.item.target_tools:
+            data["target_tools"] = self.item.target_tools
+        if self.item.claude_model:
+            data["claude_model"] = self.item.claude_model
+        if self.item.cursor_globs:
+            data["cursor_globs"] = self.item.cursor_globs
+        if self.item.cursor_always_apply is not None:
+            data["cursor_always_apply"] = self.item.cursor_always_apply
+        if self.item.policy_rules:
+            data["policy_rules"] = self.item.policy_rules
         if include_body:
             data["body"] = self.item.body
         return data
@@ -182,6 +200,8 @@ class ResolvedItem:
 @dataclass(slots=True)
 class ResolutionResult:
     workspace_context: WorkspaceContext
+    layer_chain: list[str]
+    applied_layers: list[dict[str, str]]
     enabled_sources: list[str]
     source_details: dict[str, SourceRef]
     enabled_skills: list[str]
@@ -195,6 +215,7 @@ class ResolutionResult:
     def to_dict(self) -> dict[str, Any]:
         repo_class = self.workspace_context.repo_class or "unknown"
         result: dict[str, Any] = {
+            "schema_version": "v1",
             "workspace": str(self.workspace_context.workspace),
             "git_root": str(self.workspace_context.git_root) if self.workspace_context.git_root else None,
             "normalized_remotes": self.workspace_context.normalized_remotes,
@@ -202,6 +223,8 @@ class ResolutionResult:
             "matched_repo_group_id": self.workspace_context.matched_repo_group_id,
             "binding_name": self.workspace_context.binding_name,
             "repo_class": repo_class,
+            "layer_chain": self.layer_chain,
+            "applied_layers": self.applied_layers,
             "enabled_sources": self.enabled_sources,
             "source_details": {
                 source_id: {

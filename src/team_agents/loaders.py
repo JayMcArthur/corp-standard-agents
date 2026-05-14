@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from team_agents.errors import ValidationError
+from team_agents.frontmatter import parse_frontmatter_document
+from team_agents.item_schema import validate_item_toml
 from team_agents.models import (
     CorpRepo,
     Item,
@@ -97,7 +99,13 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
     return LayerData(config=config, items=items)
 
 
-def load_items(layer_root: Path, source_type: str, source_namespace: str) -> dict[str, Item]:
+def load_items(
+    layer_root: Path,
+    source_type: str,
+    source_namespace: str,
+    *,
+    allow_native_source_formats: bool = False,
+) -> dict[str, Item]:
     items: dict[str, Item] = {}
     for kind, folder in VALID_KINDS.items():
         base = layer_root / folder
@@ -108,11 +116,22 @@ def load_items(layer_root: Path, source_type: str, source_namespace: str) -> dic
             if item.item_id in items:
                 raise ValidationError(f"Duplicate canonical id in layer {layer_root}: {item.item_id}")
             items[item.item_id] = item
+    if allow_native_source_formats:
+        for item in load_claude_native_items(layer_root, source_type, source_namespace).values():
+            if item.item_id in items:
+                raise ValidationError(f"Duplicate canonical id in layer {layer_root}: {item.item_id}")
+            items[item.item_id] = item
+        for item in load_cursor_native_items(layer_root, source_type, source_namespace).values():
+            if item.item_id in items:
+                raise ValidationError(f"Duplicate canonical id in layer {layer_root}: {item.item_id}")
+            items[item.item_id] = item
     return items
 
 
 def load_item(item_dir: Path, expected_kind: str, source_type: str, source_namespace: str) -> Item:
-    raw = read_toml(item_dir / "item.toml")
+    item_path = item_dir / "item.toml"
+    raw = read_toml(item_path)
+    validate_item_toml(raw, item_path)
     kind = str(raw.get("kind", ""))
     if kind != expected_kind:
         raise ValidationError(f"{item_dir} declared kind {kind!r}; expected {expected_kind!r}")
@@ -129,25 +148,103 @@ def load_item(item_dir: Path, expected_kind: str, source_type: str, source_names
     item = Item(
         item_id=item_id,
         kind=kind,
-        title=str(raw.get("title", item_dir.name)),
+        title=str(raw["title"]),
         privacy=privacy,
         source_type=source_type,
         source_namespace=source_namespace,
         source_ref=str(raw.get("source_ref", layer_root_ref(item_dir))),
         body=body_path.read_text(encoding="utf-8"),
         slug=parts[3],
-        item_path=item_dir / "item.toml",
+        item_path=item_path,
         body_path=body_path,
         tags=_str_list(raw.get("tags")),
         recommended_agent_types=_str_list(raw.get("recommended_agent_types")),
         timeout_seconds=_optional_int(raw.get("timeout_seconds")),
         source_note=raw.get("source_note"),
+        target_tools=_str_list(raw.get("target_tools")),
+        claude_model=raw.get("claude_model"),
+        cursor_globs=_str_list(raw.get("cursor_globs")),
+        cursor_always_apply=raw.get("cursor_always_apply"),
+        policy_rules=list(raw.get("policy_rules", [])),
     )
     return item
 
 
 def layer_root_ref(path: Path) -> str:
     return str(path.parent.parent)
+
+
+def load_claude_native_items(layer_root: Path, source_type: str, source_namespace: str) -> dict[str, Item]:
+    items: dict[str, Item] = {}
+    for skill_dir in sorted(path for path in layer_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        slug = skill_dir.name
+        raw_text = skill_md.read_text(encoding="utf-8")
+        metadata, _ = parse_frontmatter_document(raw_text, skill_md)
+        name = str(metadata.get("name") or "").strip()
+        if not name:
+            raise ValidationError(f"Claude-native skill is missing required frontmatter field 'name' in {skill_md}")
+        tools = metadata.get("tools", [])
+        if tools and not isinstance(tools, list):
+            raise ValidationError(f"Claude-native frontmatter field 'tools' must be a list in {skill_md}")
+        item_id = f"{source_type}.{source_namespace}.skill.{slug}"
+        items[item_id] = Item(
+            item_id=item_id,
+            kind="skill",
+            title=name,
+            privacy="repo-safe",
+            source_type=source_type,
+            source_namespace=source_namespace,
+            source_ref=str(layer_root),
+            body=raw_text,
+            slug=slug,
+            item_path=skill_md,
+            body_path=skill_md,
+            target_tools=[str(tool) for tool in tools],
+            claude_model=str(metadata["model"]) if metadata.get("model") else None,
+        )
+    return items
+
+
+def load_cursor_native_items(layer_root: Path, source_type: str, source_namespace: str) -> dict[str, Item]:
+    items: dict[str, Item] = {}
+    rules_root = layer_root / ".cursor" / "rules"
+    if not rules_root.exists():
+        return items
+    for path in sorted(rules_root.glob("*.mdc")):
+        raw_text = path.read_text(encoding="utf-8")
+        metadata, body = parse_frontmatter_document(raw_text, path)
+        description = str(metadata.get("description") or "").strip()
+        if not description:
+            raise ValidationError(f"Cursor-native rule is missing required frontmatter field 'description' in {path}")
+        globs = metadata.get("globs", [])
+        if globs and not isinstance(globs, list):
+            raise ValidationError(f"Cursor-native frontmatter field 'globs' must be a list in {path}")
+        always_apply = metadata.get("alwaysApply")
+        if always_apply is not None and not isinstance(always_apply, bool):
+            raise ValidationError(f"Cursor-native frontmatter field 'alwaysApply' must be a boolean in {path}")
+        slug = path.stem
+        item_id = f"{source_type}.{source_namespace}.skill.{slug}"
+        items[item_id] = Item(
+            item_id=item_id,
+            kind="skill",
+            title=slug.replace("-", " ").title(),
+            privacy="repo-safe",
+            source_type=source_type,
+            source_namespace=source_namespace,
+            source_ref=str(layer_root),
+            body=body.strip() + "\n",
+            slug=slug,
+            item_path=path,
+            body_path=path,
+            target_tools=["cursor"],
+            cursor_globs=[str(glob) for glob in globs],
+            cursor_always_apply=always_apply,
+            source_note=description,
+        )
+    return items
 
 
 def load_source_registry(root: Path) -> dict[str, SourceDefinition]:
