@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from team_agents.errors import ValidationError
+from team_agents.frontmatter import parse_frontmatter_document
 from team_agents.library import render_codex_section, render_cursor_rule
 from team_agents.loaders import load_item, load_items
 from team_agents.output import render_skill_markdown
@@ -72,6 +73,78 @@ class SourceFormatNormalizerTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValidationError, "missing required frontmatter field 'name'"):
                 load_items(root, source_type="external", source_namespace="shared", allow_native_source_formats=True)
+
+    def test_claude_native_multiline_list_frontmatter_is_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "reviewer" / "SKILL.md",
+                "---\n"
+                'name: "Reviewer"\n'
+                'description: "Review things"\n'
+                "tools:\n"
+                "  - Bash(npx reviewer *)\n"
+                "  - Read\n"
+                "---\n\n"
+                "Body\n",
+            )
+            items = load_items(root, source_type="external", source_namespace="shared", allow_native_source_formats=True)
+            item = items["external.shared.skill.reviewer"]
+            self.assertEqual(item.target_tools, ["Bash(npx reviewer *)", "Read"])
+
+    def test_claude_native_folded_text_frontmatter_is_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "reviewer" / "SKILL.md",
+                "---\n"
+                'name: "Reviewer"\n'
+                "description: >\n"
+                "  First line\n"
+                "  second line\n"
+                "---\n\n"
+                "Body\n",
+            )
+            metadata, _ = parse_frontmatter_document((root / "reviewer" / "SKILL.md").read_text(encoding="utf-8"), root / "reviewer" / "SKILL.md")
+            self.assertEqual(metadata["description"], "First line second line")
+            items = load_items(root, source_type="external", source_namespace="shared", allow_native_source_formats=True)
+            item = items["external.shared.skill.reviewer"]
+            self.assertEqual(item.title, "Reviewer")
+
+    def test_claude_native_skills_folder_layout_is_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "skills" / "taste-skill" / "SKILL.md",
+                "---\n"
+                'name: "Taste Skill"\n'
+                'description: "Design taste guidance"\n'
+                "---\n\n"
+                "Taste body\n",
+            )
+            items = load_items(root, source_type="external", source_namespace="taste", allow_native_source_formats=True)
+            item = items["external.taste.skill.taste-skill"]
+            self.assertEqual(item.title, "Taste Skill")
+            self.assertEqual(item.slug, "taste-skill")
+
+    def test_hidden_claude_skills_layout_is_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / ".claude" / "skills" / "ui-ux-pro-max" / "SKILL.md",
+                "---\n"
+                'name: "UI UX Pro Max"\n'
+                'description: "Design intelligence"\n'
+                "metadata:\n"
+                '  author: "claudekit"\n'
+                '  version: "1.0.0"\n'
+                "---\n\n"
+                "Design body\n",
+            )
+            items = load_items(root, source_type="external", source_namespace="uiux", allow_native_source_formats=True)
+            item = items["external.uiux.skill.ui-ux-pro-max"]
+            self.assertEqual(item.title, "UI UX Pro Max")
+            self.assertEqual(item.slug, "ui-ux-pro-max")
 
     def test_cursor_native_malformed_frontmatter_fails_clearly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

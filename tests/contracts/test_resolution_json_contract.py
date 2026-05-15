@@ -19,16 +19,16 @@ class ResolutionJsonContractTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.home = self.root / "home"
         self.home.mkdir()
-        self.internal_remote = "github.com/acme/internal-app"
+        self.internal_remote = "git.example.test/demo/internal-app"
         self.external_url, self.external_commit = create_external_source_repo(self.root)
         self.corp_repo = create_corp_repo(
             self.root,
             self.external_url,
             self.external_commit,
             self.internal_remote,
-            "github.com/acme/internal-alt",
-            "github.com/acme/client-private",
-            "github.com/acme/client-tracked",
+            "git.example.test/demo/internal-alt",
+            "git.example.test/demo/client-private",
+            "git.example.test/demo/client-tracked",
         )
         self.user_overrides = create_user_overrides(self.root)
         self.workspace = self.root / "workspace-internal"

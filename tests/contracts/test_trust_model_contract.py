@@ -32,16 +32,16 @@ class TrustModelContractTests(unittest.TestCase):
             self.root,
             self.external_url,
             self.external_commit,
-            "github.com/acme/internal-app",
-            "github.com/acme/internal-alt",
-            "github.com/acme/client-private",
-            "github.com/acme/client-tracked",
+            "git.example.test/demo/internal-app",
+            "git.example.test/demo/internal-alt",
+            "git.example.test/demo/client-private",
+            "git.example.test/demo/client-tracked",
         )
         self.user_overrides = create_user_overrides(self.root)
         self.machine.corp_repo_path = self.corp_repo
         self.machine.user_override_path = self.user_overrides
         self.workspace = self.root / "workspace-internal"
-        init_repo(self.workspace, "https://github.com/acme/internal-app.git")
+        init_repo(self.workspace, "https://git.example.test/demo/internal-app.git")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()

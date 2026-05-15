@@ -115,6 +115,49 @@ def create_personal_source_repo(root: Path) -> tuple[str, str]:
     return str(repo), git(repo, "rev-parse", "HEAD")
 
 
+def create_collision_source_repo(root: Path) -> tuple[str, str]:
+    repo = root / "collision-source"
+    repo.mkdir(parents=True, exist_ok=True)
+    git(repo, "init")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "Test User")
+    write(
+        repo / "skills" / "ext-review" / "item.toml",
+        """
+        id = "external.collision.skill.ext-review"
+        kind = "skill"
+        title = "Collision Review"
+        privacy = "repo-safe"
+        """,
+    )
+    write(repo / "skills" / "ext-review" / "body.md", "Collision review body")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "collision source")
+    return str(repo), git(repo, "rev-parse", "HEAD")
+
+
+def create_targeted_collision_source_repo(root: Path, name: str, item_id: str, target_tool: str) -> tuple[str, str]:
+    repo = root / name
+    repo.mkdir(parents=True, exist_ok=True)
+    git(repo, "init")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "Test User")
+    write(
+        repo / "skills" / "shared-helper" / "item.toml",
+        f"""
+        id = "{item_id}"
+        kind = "skill"
+        title = "Shared Helper"
+        privacy = "repo-safe"
+        target_tools = ["{target_tool}"]
+        """,
+    )
+    write(repo / "skills" / "shared-helper" / "body.md", f"{target_tool} helper body")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", f"{name} source")
+    return str(repo), git(repo, "rev-parse", "HEAD")
+
+
 def create_corp_repo(
     root: Path,
     external_url: str,
@@ -147,6 +190,17 @@ def create_corp_repo(
         """,
     )
     write(corp / "org" / "skills" / "shell-global" / "body.md", "Shell global body")
+    write(
+        corp / "org" / "skills" / "repo-onboarding" / "item.toml",
+        """
+        id = "corp.shadowknight.skill.repo-onboarding"
+        kind = "skill"
+        title = "Repo Onboarding"
+        privacy = "repo-safe"
+        usage_mode = "one-time"
+        """,
+    )
+    write(corp / "org" / "skills" / "repo-onboarding" / "body.md", "Repo onboarding body")
     write(
         corp / "org" / "skills" / "internal-ops" / "item.toml",
         """
@@ -356,12 +410,25 @@ class TeamAgentsTests(unittest.TestCase):
         self._old_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.home)
         self.cache_root = self.home / ".team-agents" / "cache"
-        self.internal_remote = "github.com/acme/internal-app"
-        self.internal_alt_remote = "github.com/acme/internal-alt"
-        self.client_private_remote = "github.com/acme/client-private"
-        self.client_tracked_remote = "github.com/acme/client-tracked"
+        self.internal_remote = "git.example.test/demo/internal-app"
+        self.internal_alt_remote = "git.example.test/demo/internal-alt"
+        self.client_private_remote = "git.example.test/demo/client-private"
+        self.client_tracked_remote = "git.example.test/demo/client-tracked"
         self.external_url, self.external_commit = create_external_source_repo(self.root)
         self.personal_url, self.personal_commit = create_personal_source_repo(self.root)
+        self.collision_url, self.collision_commit = create_collision_source_repo(self.root)
+        self.alpha_url, self.alpha_commit = create_targeted_collision_source_repo(
+            self.root,
+            "alpha-source",
+            "external.alpha.skill.shared-helper",
+            "claude",
+        )
+        self.beta_url, self.beta_commit = create_targeted_collision_source_repo(
+            self.root,
+            "beta-source",
+            "external.beta.skill.shared-helper",
+            "codex",
+        )
         self.bound_workspace = self.root / "non-git-bound"
         self.bound_workspace.mkdir()
         self.corp_repo = create_corp_repo(
@@ -378,10 +445,10 @@ class TeamAgentsTests(unittest.TestCase):
         self.client_private_repo = self.root / "workspace-client-private"
         self.client_tracked_repo = self.root / "workspace-client-tracked"
         self.unknown_repo = self.root / "workspace-unknown"
-        init_repo(self.internal_repo, "git@github.com:acme/internal-app.git", tracked_agents="Manual intro")
-        init_repo(self.client_private_repo, "https://github.com/acme/client-private.git")
-        init_repo(self.client_tracked_repo, "https://github.com/acme/client-tracked.git", tracked_agents="Tracked client agents")
-        init_repo(self.unknown_repo, "https://github.com/acme/unknown.git")
+        init_repo(self.internal_repo, "git@git.example.test:demo/internal-app.git", tracked_agents="Manual intro")
+        init_repo(self.client_private_repo, "https://git.example.test/demo/client-private.git")
+        init_repo(self.client_tracked_repo, "https://git.example.test/demo/client-tracked.git", tracked_agents="Tracked client agents")
+        init_repo(self.unknown_repo, "https://git.example.test/demo/unknown.git")
 
     def tearDown(self) -> None:
         if self._old_home is None:
@@ -478,6 +545,90 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("/.agents/", exclude)
         self.assertIn("/CLAUDE.md", exclude)
         self.assertIn("/.cursor/rules/team-agents.mdc", exclude)
+
+    def test_attach_registered_repo_auto_detects_and_syncs(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["attach", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["detected_kind"], "repo")
+        self.assertEqual(payload["matched_repo_id"], "internal-app")
+        self.assertTrue(payload["synced"])
+        self.assertTrue((self.internal_repo / ".agents" / "index.md").exists())
+        self.assertTrue(any(path.endswith(".agents/resolution.json") for path in payload["written"]))
+
+    def test_attach_bound_workspace_auto_detects_and_syncs(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["attach", "--workspace", str(self.bound_workspace), "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["detected_kind"], "binding")
+        self.assertEqual(payload["binding_name"], "shared-non-git")
+        self.assertEqual(payload["matched_repo_group_id"], "platform")
+        self.assertTrue(payload["synced"])
+        self.assertTrue((self.bound_workspace / ".agents" / "resolution.json").exists())
+
+    def test_attach_unresolved_repo_can_bind_to_existing_repo(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=["repo", "internal", "internal-app"]):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
+        self.assertEqual(exit_code, 0)
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
+        self.assertEqual(resolution.workspace_context.matched_repo_id, "internal-app")
+        config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
+        self.assertIn(f'path = "{self.unknown_repo.resolve()}"', config)
+        self.assertIn('repo_id = "internal-app"', config)
+
+    def test_attach_unresolved_repo_can_bind_to_existing_group(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=["group", "plat", "platform"]):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
+        self.assertEqual(exit_code, 0)
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
+        self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
+        self.assertIn("corp.shadowknight.skill.platform-shared", resolution.enabled_skills)
+
+    def test_attach_unresolved_repo_can_use_baseline_only(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=[""]):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
+        self.assertEqual(exit_code, 0)
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
+        self.assertTrue(resolution.workspace_context.is_unknown)
+        self.assertTrue((self.unknown_repo / ".agents" / "resolution.json").exists())
+
+    def test_attach_unresolved_repo_can_configure_now(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=["configure"]):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
+        self.assertEqual(exit_code, 0)
+        config_path = self.corp_repo / "repos" / "unknown" / "config.toml"
+        self.assertTrue(config_path.exists())
+        self.assertTrue((self.unknown_repo / ".agents" / "resolution.json").exists())
 
     def test_sync_wraps_plain_skill_bodies_in_valid_frontmatter(self) -> None:
         machine = self.configure_machine()
@@ -665,7 +816,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(trust_store["sources"]["personal-remote-source"]["trust_mode"], "trust-on-first-use")
 
     def test_multi_remote_ambiguity_fails_explicitly(self) -> None:
-        git(self.internal_repo, "remote", "add", "secondary", "https://github.com/acme/internal-alt.git")
+        git(self.internal_repo, "remote", "add", "secondary", "https://git.example.test/demo/internal-alt.git")
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_overrides(machine.user_override_path)
@@ -976,7 +1127,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_onboard_repo_registers_repo_group_and_syncs(self) -> None:
         self.configure_machine()
         fresh_repo = self.root / "workspace-new"
-        init_repo(fresh_repo, "https://github.com/acme/new-client.git")
+        init_repo(fresh_repo, "https://git.example.test/demo/new-client.git")
         stdout = StringIO()
         stderr = StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
@@ -1008,10 +1159,392 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn('enabled_skills = ["corp.shadowknight.skill.platform-shared"]', config)
         self.assertTrue((fresh_repo / ".agents" / "index.md").exists())
 
+    def test_configure_repo_creates_repo_layer_config_from_current_workspace(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(self.unknown_repo),
+                    "--repo-id",
+                    "unknown-service",
+                    "--repo-class",
+                    "internal",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["mode"], "created")
+        self.assertEqual(payload["repo_id"], "unknown-service")
+        self.assertTrue(payload["synced"])
+        config = (self.corp_repo / "repos" / "unknown-service" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "unknown-service"', config)
+        self.assertIn('repo_class = "internal"', config)
+        self.assertTrue((self.unknown_repo / ".agents" / "index.md").exists())
+
+    def test_configure_repo_updates_existing_registered_repo_instead_of_failing(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--repo-group-id",
+                    "platform",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["mode"], "updated")
+        self.assertEqual(payload["repo_id"], "internal-app")
+        self.assertEqual(payload["repo_group_id"], "platform")
+        self.assertTrue(payload["synced"])
+        config = (self.corp_repo / "repos" / "internal-app" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('repo_group_id = "platform"', config)
+        self.assertTrue((self.internal_repo / ".agents" / "resolution.json").exists())
+
+    def test_configure_repo_edits_repo_layer_deltas_without_copy_down(self) -> None:
+        machine = self.configure_machine()
+        internal_alt_repo = self.root / "workspace-internal-alt"
+        init_repo(internal_alt_repo, "https://git.example.test/demo/internal-alt.git")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(internal_alt_repo),
+                    "--enable-skill",
+                    "corp.shadowknight.skill.internal-ops",
+                    "--disable-skill",
+                    "corp.shadowknight.skill.shell-global",
+                    "--disable-source",
+                    "shared-ext",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertIn("corp.shadowknight.skill.internal-ops", payload["repo_layer"]["enabled_skills"])
+        self.assertIn("corp.shadowknight.skill.shell-global", payload["repo_layer"]["disabled_skills"])
+        self.assertIn("shared-ext", payload["repo_layer"]["disabled_sources"])
+        self.assertIn("corp.shadowknight.skill.internal-ops", payload["effective"]["enabled_skills"])
+        self.assertNotIn("corp.shadowknight.skill.shell-global", payload["effective"]["enabled_skills"])
+        self.assertNotIn("shared-ext", payload["effective"]["enabled_sources"])
+
+        config = (machine.corp_repo_path / "repos" / "internal-alt" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('enabled_skills = ["corp.shadowknight.skill.internal-ops"]', config)
+        self.assertIn('disabled_skills = ["corp.shadowknight.skill.shell-global"]', config)
+        self.assertIn('disabled_sources = ["shared-ext"]', config)
+        self.assertNotIn("corp.shadowknight.skill.platform-shared", config)
+
+    def test_configure_repo_rejects_overlapping_skill_slug_collision_in_json_mode(self) -> None:
+        self.configure_machine()
+        internal_alt_repo = self.root / "workspace-internal-alt"
+        init_repo(internal_alt_repo, "https://git.example.test/demo/internal-alt.git")
+        self.assertEqual(
+            main(
+                [
+                    "add-source",
+                    "--layer",
+                    "org",
+                    "--source-id",
+                    "collision-ext",
+                    "--url",
+                    self.collision_url,
+                    "--commit",
+                    self.collision_commit,
+                    "--namespace",
+                    "collision",
+                ]
+            ),
+            0,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(internal_alt_repo),
+                    "--enable-source",
+                    "collision-ext",
+                    "--enable-skill",
+                    "external.shared.skill.ext-review",
+                    "--enable-skill",
+                    "external.collision.skill.ext-review",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Skill emission collisions must be resolved before apply", stderr.getvalue())
+
+    def test_configure_repo_interactively_resolves_collision_by_disabling_loser(self) -> None:
+        machine = self.configure_machine()
+        internal_alt_repo = self.root / "workspace-internal-alt"
+        init_repo(internal_alt_repo, "https://git.example.test/demo/internal-alt.git")
+        self.assertEqual(
+            main(
+                [
+                    "add-source",
+                    "--layer",
+                    "org",
+                    "--source-id",
+                    "collision-ext",
+                    "--url",
+                    self.collision_url,
+                    "--commit",
+                    self.collision_commit,
+                    "--namespace",
+                    "collision",
+                ]
+            ),
+            0,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=["external.collision.skill.ext-review"]):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "configure-repo",
+                        "--workspace",
+                        str(internal_alt_repo),
+                        "--enable-source",
+                        "collision-ext",
+                        "--enable-skill",
+                        "external.shared.skill.ext-review",
+                        "--enable-skill",
+                        "external.collision.skill.ext-review",
+                    ]
+                )
+        self.assertEqual(exit_code, 0)
+        config = (machine.corp_repo_path / "repos" / "internal-alt" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('disabled_skills = ["external.shared.skill.ext-review"]', config)
+        self.assertIn('external.collision.skill.ext-review', config)
+
+    def test_configure_repo_allows_same_slug_when_tool_targets_do_not_overlap(self) -> None:
+        machine = self.configure_machine()
+        internal_alt_repo = self.root / "workspace-internal-alt"
+        init_repo(internal_alt_repo, "https://git.example.test/demo/internal-alt.git")
+        self.assertEqual(
+            main(
+                [
+                    "add-source",
+                    "--layer",
+                    "org",
+                    "--source-id",
+                    "alpha-ext",
+                    "--url",
+                    self.alpha_url,
+                    "--commit",
+                    self.alpha_commit,
+                    "--namespace",
+                    "alpha",
+                ]
+            ),
+            0,
+        )
+        self.assertEqual(
+            main(
+                [
+                    "add-source",
+                    "--layer",
+                    "org",
+                    "--source-id",
+                    "beta-ext",
+                    "--url",
+                    self.beta_url,
+                    "--commit",
+                    self.beta_commit,
+                    "--namespace",
+                    "beta",
+                ]
+            ),
+            0,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(internal_alt_repo),
+                    "--enable-source",
+                    "alpha-ext",
+                    "--enable-source",
+                    "beta-ext",
+                    "--enable-skill",
+                    "external.alpha.skill.shared-helper",
+                    "--enable-skill",
+                    "external.beta.skill.shared-helper",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertIn("external.alpha.skill.shared-helper", payload["effective"]["enabled_skills"])
+        self.assertIn("external.beta.skill.shared-helper", payload["effective"]["enabled_skills"])
+
+    def test_configure_group_creates_group_and_links_current_repo(self) -> None:
+        machine = self.configure_machine()
+        internal_alt_repo = self.root / "workspace-internal-alt"
+        init_repo(internal_alt_repo, "https://git.example.test/demo/internal-alt.git")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-group",
+                    "--workspace",
+                    str(internal_alt_repo),
+                    "--group-id",
+                    "ops-cluster",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["mode"], "created")
+        self.assertEqual(payload["repo_id"], "internal-alt")
+        self.assertEqual(payload["group_id"], "ops-cluster")
+        self.assertTrue(payload["synced"])
+
+        group_config = (machine.corp_repo_path / "repo-groups" / "ops-cluster" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "ops-cluster"', group_config)
+        repo_config = (machine.corp_repo_path / "repos" / "internal-alt" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('repo_group_id = "ops-cluster"', repo_config)
+
+    def test_configure_group_updates_existing_group_layer_deltas_and_sources(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-group",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--enable-skill",
+                    "corp.shadowknight.skill.internal-ops",
+                    "--disable-skill",
+                    "corp.shadowknight.skill.platform-shared",
+                    "--enable-source",
+                    "shared-ext",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["mode"], "updated")
+        self.assertEqual(payload["group_id"], "platform")
+        self.assertIn("corp.shadowknight.skill.internal-ops", payload["group_layer"]["enabled_skills"])
+        self.assertIn("corp.shadowknight.skill.platform-shared", payload["group_layer"]["disabled_skills"])
+        self.assertIn("shared-ext", payload["group_layer"]["enabled_sources"])
+        self.assertIn("corp.shadowknight.skill.internal-ops", payload["effective"]["enabled_skills"])
+        self.assertNotIn("corp.shadowknight.skill.platform-shared", payload["effective"]["enabled_skills"])
+        self.assertIn("shared-ext", payload["effective"]["enabled_sources"])
+
+        group_config = (machine.corp_repo_path / "repo-groups" / "platform" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('enabled_skills = ["corp.shadowknight.skill.internal-ops"]', group_config)
+        self.assertIn('disabled_skills = ["corp.shadowknight.skill.platform-shared"]', group_config)
+        self.assertIn('enabled_sources = ["shared-ext"]', group_config)
+
+    def test_complete_skill_disables_one_time_skill_at_repo_scope(self) -> None:
+        machine = self.configure_machine()
+        self.assertEqual(
+            main(
+                [
+                    "configure-repo",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--enable-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--json",
+                ]
+            ),
+            0,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "complete-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["scope"], "repo")
+        self.assertNotIn("corp.shadowknight.skill.repo-onboarding", payload["enabled_skills"])
+        repo_config = (machine.corp_repo_path / "repos" / "internal-app" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('disabled_skills = ["corp.shadowknight.skill.repo-onboarding"]', repo_config)
+
+    def test_complete_skill_disables_one_time_skill_at_binding_scope(self) -> None:
+        machine = self.configure_machine()
+        platform_config_path = machine.corp_repo_path / "repo-groups" / "platform" / "config.toml"
+        platform_config = platform_config_path.read_text(encoding="utf-8")
+        platform_config_path.write_text(
+            platform_config.replace(
+                'enabled_skills = ["corp.shadowknight.skill.platform-shared"]',
+                'enabled_skills = ["corp.shadowknight.skill.platform-shared", "corp.shadowknight.skill.repo-onboarding"]',
+            ),
+            encoding="utf-8",
+        )
+        bound = self.root / "bound-onboarding"
+        bound.mkdir()
+        self.assertEqual(
+            main(
+                [
+                    "bind-workspace",
+                    "--path",
+                    str(bound),
+                    "--name",
+                    "bound-onboarding",
+                    "--repo-group-id",
+                    "platform",
+                ]
+            ),
+            0,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "complete-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--workspace",
+                    str(bound),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["scope"], "binding")
+        self.assertNotIn("corp.shadowknight.skill.repo-onboarding", payload["enabled_skills"])
+        user_config = machine.user_override_path / "config.toml"
+        self.assertIn('disabled_skills = ["corp.shadowknight.skill.repo-onboarding"]', user_config.read_text(encoding="utf-8"))
+
     def test_onboard_repo_prompts_for_missing_values(self) -> None:
         self.configure_machine()
         fresh_repo = self.root / "workspace-prompted"
-        init_repo(fresh_repo, "https://github.com/acme/prompted-service.git")
+        init_repo(fresh_repo, "https://git.example.test/demo/prompted-service.git")
         answers = [
             "",  # repo id -> derived default
             "",  # repo class -> internal
@@ -1130,6 +1663,91 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertTrue(manifest.exists())
         repo_config = (corp_dest / "repos" / "source-internal" / "config.toml").read_text(encoding="utf-8")
         self.assertIn('enabled_sources = ["shared-second"]', repo_config)
+
+    def test_add_source_rejects_same_url_different_commit_without_explicit_choice(self) -> None:
+        self.configure_machine()
+        write(self.root / "external-source" / "README.md", "next pin")
+        git(self.root / "external-source", "add", "README.md")
+        git(self.root / "external-source", "commit", "-m", "next pin")
+        next_commit = git(self.root / "external-source", "rev-parse", "HEAD")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "add-source",
+                    "--layer",
+                    "org",
+                    "--source-id",
+                    "shared-next",
+                    "--url",
+                    self.external_url,
+                    "--commit",
+                    next_commit,
+                    "--namespace",
+                    "shared",
+                ]
+            )
+        self.assertEqual(exit_code, 1)
+        self.assertIn("already approved at another pin", stderr.getvalue())
+
+    def test_add_source_can_create_parallel_pin_track_explicitly(self) -> None:
+        self.configure_machine()
+        write(self.root / "external-source" / "README.md", "parallel pin")
+        git(self.root / "external-source", "add", "README.md")
+        git(self.root / "external-source", "commit", "-m", "parallel pin")
+        next_commit = git(self.root / "external-source", "rev-parse", "HEAD")
+        result = main(
+            [
+                "add-source",
+                "--layer",
+                "org",
+                "--source-id",
+                "shared-next",
+                "--url",
+                self.external_url,
+                "--commit",
+                next_commit,
+                "--namespace",
+                "shared-next",
+                "--allow-parallel-pin",
+            ]
+        )
+        self.assertEqual(result, 0)
+        manifest = (self.corp_repo / "org" / "sources" / "shared-next.toml").read_text(encoding="utf-8")
+        self.assertIn(f'commit = "{next_commit}"', manifest)
+        index = (self.corp_repo / "indexes" / "sources.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "shared-ext"', index)
+        self.assertIn('id = "shared-next"', index)
+
+    def test_add_source_can_update_existing_pin_track_explicitly(self) -> None:
+        self.configure_machine()
+        write(self.root / "external-source" / "README.md", "updated pin")
+        git(self.root / "external-source", "add", "README.md")
+        git(self.root / "external-source", "commit", "-m", "updated pin")
+        next_commit = git(self.root / "external-source", "rev-parse", "HEAD")
+        result = main(
+            [
+                "add-source",
+                "--layer",
+                "org",
+                "--source-id",
+                "shared-ext",
+                "--url",
+                self.external_url,
+                "--commit",
+                next_commit,
+                "--namespace",
+                "shared",
+                "--update-existing-source-id",
+                "shared-ext",
+            ]
+        )
+        self.assertEqual(result, 0)
+        manifest = (self.corp_repo / "org" / "sources" / "shared-ext.toml").read_text(encoding="utf-8")
+        self.assertIn(f'commit = "{next_commit}"', manifest)
+        index = (self.corp_repo / "indexes" / "sources.toml").read_text(encoding="utf-8")
+        self.assertEqual(index.count('id = "shared-ext"'), 1)
 
     def test_promote_skills_moves_bootstrapped_user_skill_to_org(self) -> None:
         source_root = self.root / "codex-skills"

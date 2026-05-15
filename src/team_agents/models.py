@@ -30,6 +30,7 @@ class WorkspaceBinding:
     path: Path
     repo_id: str | None = None
     repo_group_id: str | None = None
+    disabled_skills: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -105,6 +106,7 @@ class Item:
     cursor_globs: list[str] = field(default_factory=list)
     cursor_always_apply: bool | None = None
     policy_rules: list[dict[str, Any]] = field(default_factory=list)
+    usage_mode: str = "reusable"
 
 
 @dataclass(slots=True)
@@ -141,6 +143,7 @@ class WorkspaceContext:
     is_unknown: bool = False
     is_non_git: bool = False
     binding_name: str | None = None
+    binding_disabled_skills: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -192,6 +195,8 @@ class ResolvedItem:
             data["cursor_always_apply"] = self.item.cursor_always_apply
         if self.item.policy_rules:
             data["policy_rules"] = self.item.policy_rules
+        if self.item.usage_mode != "reusable":
+            data["usage_mode"] = self.item.usage_mode
         if include_body:
             data["body"] = self.item.body
         return data

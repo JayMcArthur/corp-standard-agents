@@ -29,7 +29,7 @@ class ScaffoldTests(unittest.TestCase):
         self.assertEqual(main(["init-corp-repo", "--dest", str(corp)]), 0)
         self.assertTrue((corp / "README.md").exists())
         self.assertTrue((corp / "users" / "README.md").exists())
-        self.assertTrue((corp / "org" / "skills" / "shell-global" / "item.toml").exists())
+        self.assertTrue((corp / "org" / "skills" / "recursive-planning" / "item.toml").exists())
         self.assertTrue((corp / "org" / "policies" / "no-leaks" / "item.toml").exists())
         self.assertTrue((corp / "org" / "docs" / "authoring-example" / "item.toml").exists())
 

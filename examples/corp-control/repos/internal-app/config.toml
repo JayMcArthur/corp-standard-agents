@@ -1,5 +1,5 @@
 id = "internal-app"
-normalized_remotes = ["github.com/acme/internal-app"]
+normalized_remotes = ["git.example.test/demo/internal-app"]
 repo_group_id = "platform"
 repo_class = "internal"
 enabled_skills = [
@@ -13,4 +13,3 @@ docs = ["corp.shadowknight.doc.internal-runbook"]
 [[item_override]]
 id = "external.shared.skill.ext-lint"
 timeout_seconds = 77
-

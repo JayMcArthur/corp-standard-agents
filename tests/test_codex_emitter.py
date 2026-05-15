@@ -54,14 +54,14 @@ class CodexEmitterTests(unittest.TestCase):
         )
         self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
         content = (self.home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
-        shell_global_source = self.home / ".team-agents" / "library" / "corp" / "skills" / "shell-global" / "body.md"
+        recursive_planning_source = self.home / ".team-agents" / "library" / "corp" / "skills" / "recursive-planning" / "body.md"
         expected_source = self.home / ".team-agents" / "library" / "user" / "skills" / "reviewer" / "body.md"
         expected = (
             "<!-- team-agents:start -->\n"
-            "## Shell Global\n"
-            f"Library body: `{shell_global_source}`\n\n"
-            "## Shell Global\n\n"
-            "        Replace this with your global shell helper skill.\n\n"
+            "## Recursive Planning\n"
+            f"Library body: `{recursive_planning_source}`\n\n"
+            "## Recursive Planning\n\n"
+            "        Use this as a realistic starter skill for broad, uncertain, multi-step work.\n\n"
             "## Reviewer\n"
             f"Library body: `{expected_source}`\n\n"
             "review body\n"

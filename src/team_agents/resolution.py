@@ -47,12 +47,17 @@ def build_workspace_context(workspace: Path, corp: CorpRepo, user: UserOverrides
     if len(matching) > 1:
         raise ResolutionError(f"Multiple repo mappings matched remotes for {git_root}: {', '.join(sorted(matching))}")
     if not matching:
-        return WorkspaceContext(
+        binding = match_workspace_binding(git_root, user.workspace_bindings)
+        context = WorkspaceContext(
             workspace=workspace,
             git_root=git_root,
             normalized_remotes=remotes,
-            is_unknown=True,
+            is_unknown=binding is None,
+            binding_name=binding.name if binding else None,
         )
+        if binding:
+            apply_binding(context, binding, corp)
+        return context
     repo_id = matching[0]
     repo_layer = corp.repos[repo_id]
     return WorkspaceContext(
@@ -108,6 +113,11 @@ def resolve_workspace(
             corp.org.config,
             user_layer,
         )
+    if context.binding_disabled_skills:
+        enabled_skills = set(enabled_skills) - set(context.binding_disabled_skills)
+        for item_id in list(skill_activations):
+            if item_id in context.binding_disabled_skills:
+                skill_activations.pop(item_id, None)
     active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
     recommended_agent_types = merge_recommended_agent_types(layers, unknown_only=context.is_unknown)
     active_ids = set(enabled_skills) | set(active_policy_ids) | set(docs)
@@ -373,3 +383,4 @@ def apply_binding(context: WorkspaceContext, binding: WorkspaceBinding, corp: Co
         context.matched_repo_group_id = binding.repo_group_id
         context.repo_class = "internal"
         context.is_unknown = False
+    context.binding_disabled_skills = list(binding.disabled_skills)

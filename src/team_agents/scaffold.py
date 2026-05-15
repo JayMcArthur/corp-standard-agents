@@ -33,29 +33,29 @@ def init_corp_repo(dest: Path) -> None:
         """
         id = "example-org"
         enabled_sources = []
-        enabled_skills = ["corp.example-org.skill.shell-global"]
+        enabled_skills = ["corp.example-org.skill.recursive-planning"]
         baseline_policies = ["corp.example-org.policy.no-leaks"]
         recommended_agent_types = ["shell"]
-        minimal_enabled_skills = ["corp.example-org.skill.shell-global"]
+        minimal_enabled_skills = ["corp.example-org.skill.recursive-planning"]
         protected_fields = ["baseline_policies", "privacy_rules"]
         """,
     )
     _write(
-        dest / "org" / "skills" / "shell-global" / "item.toml",
+        dest / "org" / "skills" / "recursive-planning" / "item.toml",
         """
         # Required fields for every item.
-        id = "corp.example-org.skill.shell-global"
+        id = "corp.example-org.skill.recursive-planning"
         kind = "skill"
-        title = "Shell Global"
+        title = "Recursive Planning"
         privacy = "repo-safe"
         """,
     )
     _write(
-        dest / "org" / "skills" / "shell-global" / "body.md",
+        dest / "org" / "skills" / "recursive-planning" / "body.md",
         """
-        ## Shell Global
+        ## Recursive Planning
 
-        Replace this with your global shell helper skill.
+        Use this as a realistic starter skill for broad, uncertain, multi-step work.
         """,
     )
     _write(
@@ -101,9 +101,9 @@ def init_corp_repo(dest: Path) -> None:
         dest / "repos" / "example-repo" / "config.toml",
         """
         id = "example-repo"
-        normalized_remotes = ["github.com/example/example-repo"]
+        normalized_remotes = ["git.example.test/example/example-repo"]
         repo_class = "internal"
-        enabled_skills = ["corp.example-org.skill.shell-global"]
+        enabled_skills = ["corp.example-org.skill.recursive-planning"]
         """,
     )
     _write(

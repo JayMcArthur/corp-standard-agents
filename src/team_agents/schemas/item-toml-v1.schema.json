@@ -108,6 +108,10 @@
           }
         }
       }
+    },
+    "usage_mode": {
+      "type": "string",
+      "enum": ["reusable", "one-time"]
     }
   }
 }

@@ -38,6 +38,7 @@ The canonical machine-readable schema lives at [src/team_agents/schemas/item-tom
 | `cursor_globs` | array of string | Optional Cursor rule glob targeting |
 | `cursor_always_apply` | boolean | Optional Cursor always-apply flag |
 | `policy_rules` | array of object | Optional structured policy rules for `kind = "policy"` items |
+| `usage_mode` | string | Optional lifecycle hint; must be `reusable` or `one-time` |
 
 ## Invariants
 
@@ -45,6 +46,7 @@ The canonical machine-readable schema lives at [src/team_agents/schemas/item-tom
 - The `kind` field must agree with the canonical id kind segment.
 - `timeout_seconds` must be greater than or equal to `1`.
 - `item.toml` declares metadata only. Human-readable body content remains in `body.md`.
+- `usage_mode = "one-time"` marks an item as eligible for local completion suppression; it does not imply automatic mutation by the resolver.
 
 ## Notes
 

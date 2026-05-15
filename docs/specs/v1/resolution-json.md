@@ -43,6 +43,7 @@ Required top-level fields:
 ## Provenance Guarantees
 
 - Every resolved or denied item records its `layer_name`, `status`, `activated_by`, `source_type`, `source_namespace`, and `source_ref`.
+- Items may optionally record `usage_mode` when the source metadata marks them as `one-time`.
 - Replacements additionally record `replaced_from`.
 - Field overrides are tracked through `status = "field-overridden"` plus `overridden_by`.
 - Source trust metadata is frozen under `source_details`.

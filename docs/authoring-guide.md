@@ -123,11 +123,13 @@ User override `config.toml` may include:
 name = "example-non-git"
 path = "/abs/path/to/workspace"
 repo_group_id = "platform"
+disabled_skills = ["corp.shadowknight.skill.repo-onboarding"]
 ```
 
 Rules:
 - `name` and `path` are required
 - set `repo_id` or `repo_group_id`, not both
+- `disabled_skills` is optional and currently intended for local one-time skill suppression
 
 ## Item Overrides
 
@@ -185,6 +187,27 @@ Current supported rules:
 - `forbidden_source_patterns`
 
 Use `team-agents doctor --json` to inspect per-policy compliance entries with severity, detail, and remediation.
+
+## Usage Mode
+
+Items may optionally declare:
+
+```toml
+usage_mode = "one-time"
+```
+
+Allowed values:
+- `reusable`
+- `one-time`
+
+Meaning:
+- `reusable` skills remain part of steady-state resolution while enabled
+- `one-time` skills are intended for setup/onboarding tasks and may be locally suppressed after completion
+
+Completion model:
+- registered repos suppress one-time skills at repo scope
+- bound paths suppress one-time skills in the workspace binding
+- upstream org or repo-group definitions remain unchanged
 
 ## Native Source Inputs
 

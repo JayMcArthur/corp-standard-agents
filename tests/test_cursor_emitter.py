@@ -91,3 +91,34 @@ class CursorEmitterTests(unittest.TestCase):
         self.assertTrue((self.home / ".claude" / "skills" / "reviewer" / "SKILL.md").exists())
         self.assertTrue((self.home / ".codex" / "AGENTS.md").exists())
         self.assertTrue((self.home / ".cursor" / "rules" / "reviewer.mdc").exists())
+
+    def test_setup_user_prunes_stale_managed_cursor_rules(self) -> None:
+        rendered_root = self.home / ".team-agents" / "library" / "rendered" / "cursor" / "rules"
+        rendered_root.mkdir(parents=True, exist_ok=True)
+        legacy_rule = rendered_root / "legacy-only.mdc"
+        write(legacy_rule, "---\ndescription: legacy\n---\nlegacy\n")
+        stale_target = self.home / ".cursor" / "rules" / "legacy-only.mdc"
+        stale_target.parent.mkdir(parents=True, exist_ok=True)
+        stale_target.symlink_to(legacy_rule)
+        write(
+            self.corp / "users" / "alice" / "skills" / "reviewer" / "item.toml",
+            """
+            id = "user.alice.skill.reviewer"
+            kind = "skill"
+            title = "Reviewer"
+            privacy = "repo-safe"
+            target_tools = ["cursor"]
+            """,
+        )
+        write(self.corp / "users" / "alice" / "skills" / "reviewer" / "body.md", "review body")
+        write(
+            self.corp / "users" / "alice" / "config.toml",
+            """
+            id = "alice"
+            enabled_skills = ["user.alice.skill.reviewer"]
+            preferred_agent_types = ["local-helper"]
+            """,
+        )
+        self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
+        self.assertFalse(stale_target.exists())
+        self.assertTrue((self.home / ".cursor" / "rules" / "reviewer.mdc").exists())

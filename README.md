@@ -25,12 +25,73 @@ To remove the wrapper and virtualenv without deleting local state:
 bash scripts/uninstall.sh
 ```
 
-## Commands
+## Official Flow
+
+The product has four primary commands:
+
+- `team-agents attach`
+- `team-agents configure-repo`
+- `team-agents configure-group`
+- `team-agents complete-skill <skill-id>`
+
+Role model:
+- most users run `attach`
+- repo owners run `configure-repo`
+- shared/team leads run `configure-group`
+- one-time setup skills are hidden locally with `complete-skill`
+
+Everyday path after cloning a repo:
+
+```bash
+team-agents attach
+team-agents status --json
+team-agents doctor
+```
+
+If the repo is already known, `attach` auto-detects it and syncs immediately.
+
+If the location is unresolved, `attach` guides you to:
+- attach to an existing repo
+- attach to an existing repo-group
+- use the unknown-workspace baseline
+- configure the repo now
+
+## Owner Flows
+
+Configure repo-layer defaults from the current repo:
+
+```bash
+team-agents configure-repo --workspace /path/to/repo --repo-class internal
+team-agents configure-repo --workspace /path/to/repo --enable-skill corp.example-org.skill.recursive-planning
+team-agents configure-repo --workspace /path/to/repo --disable-source shared-ext
+```
+
+Configure or relink a shared repo-group from inside a repo:
+
+```bash
+team-agents configure-group --workspace /path/to/repo --group-id platform
+team-agents configure-group --workspace /path/to/repo --enable-source shared-ext
+team-agents configure-group --workspace /path/to/repo --disable-skill corp.example-org.skill.recursive-planning
+```
+
+Mark a one-time setup skill complete for just this repo or bound path:
+
+```bash
+team-agents complete-skill corp.example-org.skill.repo-onboarding --workspace /path/to/repo
+```
+
+Behavior rules:
+- repo-group and repo editing are delta-only; inherited config is not copied downward
+- disabling inherited skills or sources is first-class
+- colliding emitted skills must be resolved explicitly before apply
+- one-time skills are suppressed locally after completion; they are not deleted upstream
+
+## Full Command Surface
 
 ```bash
 bash scripts/install.sh
 team-agents setup --corp-repo /path/to/corp-control --user alice
-team-agents setup --corp-repo /path/to/corp-control --user alice --workspace /path/to/repo --repo-id my-repo --repo-class internal --sync
+team-agents attach --workspace /path/to/repo
 team-agents sync --workspace /path/to/repo
 team-agents sync --workspace /path/to/repo --dry-run
 team-agents audit --workspace /path/to/repo
@@ -38,7 +99,10 @@ team-agents context --workspace /path/to/repo --pretty
 team-agents status --workspace /path/to/repo --json
 team-agents doctor --workspace /path/to/repo
 team-agents update
-team-agents onboard-repo --workspace /path/to/repo --repo-class internal --repo-group-id platform --enable-skill corp.example-org.skill.shell-global
+team-agents configure-repo --workspace /path/to/repo --repo-class internal
+team-agents configure-group --workspace /path/to/repo --group-id platform
+team-agents complete-skill corp.example-org.skill.repo-onboarding --workspace /path/to/repo
+team-agents onboard-repo --workspace /path/to/repo --repo-class internal --repo-group-id platform --enable-skill corp.example-org.skill.recursive-planning
 team-agents bind-workspace --path /path/to/non-git-workspace --repo-group-id platform
 team-agents refresh-personal-skills --source ~/.agents/skills
 team-agents migrate-user-overrides --user alice --corp-repo /path/to/corp-control
@@ -120,12 +184,36 @@ Minimum supported Cursor version:
 - user-global `.cursor/rules/` support is required for the default Cursor emitter path
 - older Cursor versions may still work with workspace-local rules after `sync`, but the user-global default surface is unsupported
 
+## Layer Model
+
+Resolution is layered:
+
+```text
+org -> repo-group -> repo -> user
+```
+
+Editing commands target one layer only:
+- `configure-group` edits repo-group deltas
+- `configure-repo` edits repo deltas
+- user overrides stay separate
+
+Bindings are narrower than layers:
+- non-git or explicitly attached paths can bind to a repo or repo-group
+- bindings may suppress one-time skills locally after completion
+- bindings do not become a full arbitrary override layer
+
 ## Trust
 
 - Corp-managed external sources are pinned to explicit commits.
 - Optional manifest fingerprints are verified when present.
 - User-managed remote sources use local trust-on-first-use records under the cache root unless a manifest fingerprint is provided.
 - `status --json`, `doctor --json`, and `.agents/resolution.json` expose source trust and fingerprint metadata.
+
+If the same upstream source URL is added at a different commit, `add-source` requires an explicit choice:
+- update an existing source id to the new pin
+- or allow a second parallel pin track
+
+Different enabled sources may coexist only when their emitted skill surfaces do not collide. Otherwise configuration must explicitly choose a winner.
 
 ## Tests
 
@@ -162,7 +250,7 @@ You can validate the full example flow with:
 bash scripts/check_example_flow.sh
 ```
 
-## Local Onboarding
+## Bootstrap
 
 Canonical flow:
 
@@ -191,39 +279,21 @@ Recommended lifecycle:
 
 `bootstrap-import` is a migration path. After import, the managed items live natively in corp or user layers.
 
-## Guided Repo Operations
+## Lower-Level Commands
 
-After install, the normal operational commands should be:
-
-```bash
-team-agents sync
-team-agents audit
-team-agents context --pretty
-```
-
-To onboard an unknown git repo into the corp control repo:
+Older and lower-level primitives still exist for scripting or narrow use:
 
 ```bash
 team-agents onboard-repo \
   --workspace /path/to/repo \
   --repo-class internal \
   --repo-group-id platform \
-  --enable-skill corp.example-org.skill.shell-global
-```
-
-To refresh imported personal local skills from `~/.agents/skills`:
-
-```bash
+  --enable-skill corp.example-org.skill.recursive-planning
 team-agents refresh-personal-skills
-```
-
-To bind a non-git workspace to a repo or repo-group:
-
-```bash
 team-agents bind-workspace --path /path/to/folder --repo-group-id platform
 ```
 
-`register-repo` still exists as a lower-level command, but `onboard-repo` is the primary user-facing onboarding flow.
+`onboard-repo`, `bind-workspace`, and `register-repo` remain useful building blocks, but they are no longer the primary product story.
 
 ## License
 

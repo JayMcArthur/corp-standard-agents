@@ -97,3 +97,59 @@ class ClaudeEmitterTests(unittest.TestCase):
         self.assertIn('name: "Native Reviewer"', content)
         self.assertIn('description: "Native description"', content)
         self.assertIn("Native body", content)
+
+    def test_setup_user_prunes_stale_legacy_claude_skill_symlinks(self) -> None:
+        legacy_skill = self.home / ".agents" / "skills" / "legacy-only" / "SKILL.md"
+        write(legacy_skill, "# legacy")
+        stale_target = self.home / ".claude" / "skills" / "legacy-only" / "SKILL.md"
+        stale_target.parent.mkdir(parents=True, exist_ok=True)
+        stale_target.symlink_to(legacy_skill)
+        write(
+            self.corp / "users" / "alice" / "skills" / "reviewer" / "item.toml",
+            """
+            id = "user.alice.skill.reviewer"
+            kind = "skill"
+            title = "Reviewer"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp / "users" / "alice" / "skills" / "reviewer" / "body.md", "review body")
+        write(
+            self.corp / "users" / "alice" / "config.toml",
+            """
+            id = "alice"
+            enabled_skills = ["user.alice.skill.reviewer"]
+            preferred_agent_types = ["local-helper"]
+            """,
+        )
+        self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
+        self.assertFalse((self.home / ".claude" / "skills" / "legacy-only").exists())
+        self.assertTrue((self.home / ".claude" / "skills" / "reviewer" / "SKILL.md").exists())
+
+    def test_setup_user_replaces_legacy_top_level_claude_skills_symlink(self) -> None:
+        legacy_root = self.home / ".agents" / "skills"
+        legacy_root.mkdir(parents=True, exist_ok=True)
+        claude_root = self.home / ".claude" / "skills"
+        claude_root.parent.mkdir(parents=True, exist_ok=True)
+        claude_root.symlink_to(legacy_root, target_is_directory=True)
+        write(
+            self.corp / "users" / "alice" / "skills" / "reviewer" / "item.toml",
+            """
+            id = "user.alice.skill.reviewer"
+            kind = "skill"
+            title = "Reviewer"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp / "users" / "alice" / "skills" / "reviewer" / "body.md", "review body")
+        write(
+            self.corp / "users" / "alice" / "config.toml",
+            """
+            id = "alice"
+            enabled_skills = ["user.alice.skill.reviewer"]
+            preferred_agent_types = ["local-helper"]
+            """,
+        )
+        self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
+        self.assertFalse(claude_root.is_symlink())
+        self.assertTrue((claude_root / "reviewer" / "SKILL.md").exists())

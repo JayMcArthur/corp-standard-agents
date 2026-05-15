@@ -1,0 +1,4 @@
+id = "corp.shadowknight.skill.recursive-planning"
+kind = "skill"
+title = "Recursive Planning"
+privacy = "repo-safe"

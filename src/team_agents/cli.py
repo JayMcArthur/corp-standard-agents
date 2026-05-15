@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import re
 import sys
@@ -12,11 +13,12 @@ from team_agents.importers import import_folder_skills
 from team_agents.lifecycle import migrate_user_overrides, record_recent_workspace, reseed, run_update
 from team_agents.loaders import load_corp_repo, load_user_overrides
 from team_agents.machine import ensure_user_override_layout, load_machine_config, write_machine_config
-from team_agents.models import CorpRepo, Item, MachineConfig, ResolutionResult, UserOverrides
+from team_agents.models import CorpRepo, Item, LayerConfig, LayerData, MachineConfig, ResolutionResult, UserOverrides
 from team_agents.output import write_sync_output
 from team_agents.promotion import promote_skills
-from team_agents.repo_registry import register_repo
-from team_agents.resolution import resolve_workspace
+from team_agents.repo_group_registry import register_repo_group, update_repo_group_config
+from team_agents.repo_registry import register_repo, update_repo_config
+from team_agents.resolution import build_workspace_context, match_workspace_binding, resolve_workspace
 from team_agents.scaffold import init_corp_repo, init_user_overrides, init_user_profile
 from team_agents.source_registry import enable_source_in_layer, register_corp_source, register_user_source, resolve_layer_root
 from team_agents.toml_utils import read_toml, write_toml_document
@@ -66,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--workspace", type=Path, default=Path.cwd())
     sync.add_argument("--dry-run", action="store_true")
     sync.set_defaults(func=cmd_sync)
+
+    attach = subparsers.add_parser("attach")
+    attach.add_argument("--workspace", type=Path, default=Path.cwd())
+    attach.add_argument("--json", action="store_true")
+    attach.set_defaults(func=cmd_attach)
 
     status = subparsers.add_parser("status")
     status.add_argument("--workspace", type=Path, default=Path.cwd())
@@ -125,6 +132,31 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--json", action="store_true")
     onboard.set_defaults(func=cmd_onboard_repo)
 
+    configure_repo = subparsers.add_parser("configure-repo")
+    configure_repo.add_argument("--workspace", type=Path, default=Path.cwd())
+    configure_repo.add_argument("--repo-id")
+    configure_repo.add_argument("--repo-class", choices=["client", "internal"])
+    configure_repo.add_argument("--repo-group-id")
+    configure_repo.add_argument("--enable-skill", action="append")
+    configure_repo.add_argument("--disable-skill", action="append")
+    configure_repo.add_argument("--enable-source", action="append")
+    configure_repo.add_argument("--disable-source", action="append")
+    configure_repo.add_argument("--no-sync", action="store_true")
+    configure_repo.add_argument("--json", action="store_true")
+    configure_repo.set_defaults(func=cmd_configure_repo)
+
+    configure_group = subparsers.add_parser("configure-group")
+    configure_group.add_argument("--workspace", type=Path, default=Path.cwd())
+    configure_group.add_argument("--group-id")
+    configure_group.add_argument("--repo-id")
+    configure_group.add_argument("--enable-skill", action="append")
+    configure_group.add_argument("--disable-skill", action="append")
+    configure_group.add_argument("--enable-source", action="append")
+    configure_group.add_argument("--disable-source", action="append")
+    configure_group.add_argument("--no-sync", action="store_true")
+    configure_group.add_argument("--json", action="store_true")
+    configure_group.set_defaults(func=cmd_configure_group)
+
     bind_workspace = subparsers.add_parser("bind-workspace")
     bind_workspace.add_argument("--path", type=Path, default=Path.cwd())
     bind_workspace.add_argument("--name")
@@ -142,6 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_source.add_argument("--namespace", required=True)
     add_source.add_argument("--repo-id")
     add_source.add_argument("--enable", action="store_true")
+    add_source.add_argument("--allow-parallel-pin", action="store_true")
+    add_source.add_argument("--update-existing-source-id")
     add_source.set_defaults(func=cmd_add_source)
 
     promote = subparsers.add_parser("promote-skills")
@@ -157,6 +191,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--workspace", type=Path, default=Path.cwd())
     doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(func=cmd_doctor)
+
+    complete_skill = subparsers.add_parser("complete-skill")
+    complete_skill.add_argument("skill_id")
+    complete_skill.add_argument("--workspace", type=Path, default=Path.cwd())
+    complete_skill.add_argument("--json", action="store_true")
+    complete_skill.set_defaults(func=cmd_complete_skill)
 
     refresh = subparsers.add_parser("refresh-personal-skills")
     refresh.add_argument("--source", type=Path, default=Path.home() / ".agents" / "skills")
@@ -300,6 +340,99 @@ def cmd_sync(args: argparse.Namespace) -> int:
     record_recent_workspace(machine_config, args.workspace.expanduser().resolve())
     print(json.dumps({"written": [str(path) for path in written]}, indent=2))
     return 0
+
+
+def cmd_attach(args: argparse.Namespace) -> int:
+    machine_config = load_machine_config()
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    workspace = args.workspace.expanduser().resolve()
+    result = resolve_workspace(workspace, machine_config, corp, user)
+    if result.workspace_context.is_unknown:
+        if args.json:
+            raise TeamAgentsError("Unresolved attach flow is interactive only; run without --json")
+        return cmd_attach_unresolved(machine_config, corp, workspace, result.workspace_context)
+
+    summary = reseed(machine_config, corp, user, workspaces=[workspace], include_recent_workspaces=False)
+    synced_workspace = next((item for item in summary["workspaces"] if item["workspace"] == str(workspace)), None)
+    written = list(synced_workspace["written"]) if synced_workspace else []
+    detection_kind = "binding" if result.workspace_context.binding_name else "repo"
+    payload = {
+        "workspace": str(workspace),
+        "detected_kind": detection_kind,
+        "binding_name": result.workspace_context.binding_name,
+        "matched_repo_id": result.workspace_context.matched_repo_id,
+        "matched_repo_group_id": result.workspace_context.matched_repo_group_id,
+        "repo_class": result.workspace_context.repo_class or "unknown",
+        "synced": True,
+        "written": written,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    print(f"workspace: {workspace}")
+    if detection_kind == "repo":
+        print(f"detected: repo {result.workspace_context.matched_repo_id}")
+    else:
+        target = result.workspace_context.matched_repo_id or result.workspace_context.matched_repo_group_id or "unknown"
+        print(f"detected: binding {result.workspace_context.binding_name} -> {target}")
+    print(f"synced: {len(written)} file(s)")
+    return 0
+
+
+def cmd_attach_unresolved(
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    workspace: Path,
+    context,
+) -> int:
+    attach_path = context.git_root or workspace
+    action = prompt_attach_action()
+    if action == "baseline":
+        sync_args = argparse.Namespace(workspace=workspace, dry_run=False)
+        return cmd_sync(sync_args)
+    if action == "configure":
+        if context.git_root is not None:
+            configure_args = argparse.Namespace(
+                workspace=workspace,
+                repo_id=None,
+                repo_class=None,
+                repo_group_id=None,
+                enable_skill=None,
+                disable_skill=None,
+                enable_source=None,
+                disable_source=None,
+                no_sync=False,
+                json=False,
+            )
+            return cmd_configure_repo(configure_args)
+        bind_args = build_bind_args_for_attach(corp=corp, path=attach_path)
+        return cmd_bind_workspace(bind_args)
+    if action == "repo":
+        repo_id = prompt_candidate_id(
+            "repo",
+            ranked_repo_ids(corp, workspace=workspace, normalized_remotes=context.normalized_remotes),
+        )
+        bind_args = argparse.Namespace(
+            path=attach_path,
+            name=attach_path.name,
+            repo_id=repo_id,
+            repo_group_id=None,
+            no_sync=False,
+            json=False,
+        )
+        return cmd_bind_workspace(bind_args)
+    repo_group_id = prompt_candidate_id("repo-group", sorted(corp.repo_groups))
+    bind_args = argparse.Namespace(
+        path=attach_path,
+        name=attach_path.name,
+        repo_id=None,
+        repo_group_id=repo_group_id,
+        no_sync=False,
+        json=False,
+    )
+    return cmd_bind_workspace(bind_args)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -467,6 +600,314 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_configure_repo(args: argparse.Namespace) -> int:
+    machine_config = load_machine_config()
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    workspace = args.workspace.expanduser().resolve()
+    context = build_workspace_context(workspace, corp, user)
+    if context.git_root is None:
+        raise TeamAgentsError(f"Workspace is not inside a git repo: {workspace}")
+    if not context.normalized_remotes:
+        raise TeamAgentsError(f"Workspace git repo has no remotes: {context.git_root}")
+
+    repo_id: str
+    repo_class: str
+    repo_group_id: str | None
+    mode: str
+    base_enabled_skills: list[str] = []
+    base_disabled_skills: list[str] = []
+    base_enabled_sources: list[str] = []
+    base_disabled_sources: list[str] = []
+
+    if context.matched_repo_id:
+        matched_repo_id = context.matched_repo_id
+        if args.repo_id and args.repo_id != matched_repo_id:
+            raise TeamAgentsError(
+                f"Workspace already matches configured repo id {matched_repo_id}; "
+                "renaming repo ids is not supported by configure-repo"
+            )
+        existing = corp.repos[matched_repo_id].config
+        repo_id = matched_repo_id
+        repo_class = args.repo_class or existing.repo_class or "internal"
+        repo_group_id = args.repo_group_id if args.repo_group_id is not None else existing.repo_group_id
+        base_enabled_skills = list(existing.enabled_skills)
+        base_disabled_skills = list(existing.disabled_skills)
+        base_enabled_sources = list(existing.enabled_sources)
+        base_disabled_sources = list(existing.disabled_sources)
+        mode = "updated"
+    elif args.repo_id and args.repo_id in corp.repos:
+        existing = corp.repos[args.repo_id].config
+        repo_id = args.repo_id
+        repo_class = args.repo_class or existing.repo_class or "internal"
+        repo_group_id = args.repo_group_id if args.repo_group_id is not None else existing.repo_group_id
+        base_enabled_skills = list(existing.enabled_skills)
+        base_disabled_skills = list(existing.disabled_skills)
+        base_enabled_sources = list(existing.enabled_sources)
+        base_disabled_sources = list(existing.disabled_sources)
+        mode = "updated"
+    else:
+        repo_id = args.repo_id or derive_repo_id(context.normalized_remotes, workspace)
+        repo_class = args.repo_class or "internal"
+        repo_group_id = args.repo_group_id
+        validate_repo_group_id(repo_group_id, corp)
+        mode = "created"
+
+    validate_repo_group_id(repo_group_id, corp)
+    enabled_skills = merge_delta_values(base_enabled_skills, args.enable_skill, args.disable_skill)
+    disabled_skills = merge_delta_values(base_disabled_skills, args.disable_skill, args.enable_skill)
+    enabled_sources = merge_delta_values(base_enabled_sources, args.enable_source, args.disable_source)
+    disabled_sources = merge_delta_values(base_disabled_sources, args.disable_source, args.enable_source)
+    enabled_skills, disabled_skills = resolve_repo_collisions(
+        args=args,
+        workspace=workspace,
+        machine_config=machine_config,
+        corp=corp,
+        user=user,
+        repo_id=repo_id,
+        repo_class=repo_class,
+        repo_group_id=repo_group_id,
+        normalized_remotes=context.normalized_remotes,
+        enabled_skills=enabled_skills,
+        disabled_skills=disabled_skills,
+        enabled_sources=enabled_sources,
+        disabled_sources=disabled_sources,
+        mode=mode,
+    )
+
+    if mode == "created":
+        config_path = register_repo(
+            corp_root=machine_config.corp_repo_path,
+            workspace=workspace,
+            repo_id=repo_id,
+            repo_class=repo_class,
+            repo_group_id=repo_group_id,
+            enabled_skills=enabled_skills or None,
+        )
+        if enabled_sources or disabled_sources or disabled_skills:
+            config_path = update_repo_config(
+                config_path,
+                enabled_sources=enabled_sources or [],
+                disabled_sources=disabled_sources or [],
+                disabled_skills=disabled_skills or [],
+            )
+    else:
+        config_path = update_repo_config(
+            existing.layer_path / "config.toml",
+            normalized_remotes=context.normalized_remotes,
+            repo_class=repo_class,
+            repo_group_id=repo_group_id,
+            enabled_skills=enabled_skills,
+            disabled_skills=disabled_skills,
+            enabled_sources=enabled_sources,
+            disabled_sources=disabled_sources,
+        )
+
+    synced = False
+    written: list[str] = []
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    if not args.no_sync:
+        summary = reseed(machine_config, corp, user, workspaces=[workspace], include_recent_workspaces=False)
+        synced_workspace = next((item for item in summary["workspaces"] if item["workspace"] == str(workspace)), None)
+        written = list(synced_workspace["written"]) if synced_workspace else []
+        synced = True
+    else:
+        reseed(machine_config, corp, user)
+    resolution = resolve_workspace(workspace, machine_config, corp, user)
+    repo_layer = corp.repos[repo_id].config
+    effective = {
+        "enabled_skills": resolution.enabled_skills,
+        "enabled_sources": resolution.enabled_sources,
+    }
+    local_deltas = {
+        "enabled_skills": list(repo_layer.enabled_skills),
+        "disabled_skills": list(repo_layer.disabled_skills),
+        "enabled_sources": list(repo_layer.enabled_sources),
+        "disabled_sources": list(repo_layer.disabled_sources),
+    }
+
+    payload = {
+        "workspace": str(workspace),
+        "repo_id": repo_id,
+        "repo_class": repo_class,
+        "repo_group_id": repo_group_id,
+        "config_path": str(config_path),
+        "mode": mode,
+        "effective": effective,
+        "repo_layer": local_deltas,
+        "synced": synced,
+        "written": written,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_configure_group(args: argparse.Namespace) -> int:
+    machine_config = load_machine_config()
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    workspace = args.workspace.expanduser().resolve()
+    context = build_workspace_context(workspace, corp, user)
+    if context.git_root is None:
+        raise TeamAgentsError(f"Workspace is not inside a git repo: {workspace}")
+
+    repo_id = resolve_group_repo_target(args=args, context=context, corp=corp)
+    repo_config = corp.repos[repo_id].config
+
+    group_id, mode = resolve_group_target(args=args, repo_config=repo_config, corp=corp, workspace=workspace)
+    base_enabled_skills: list[str] = []
+    base_disabled_skills: list[str] = []
+    base_enabled_sources: list[str] = []
+    base_disabled_sources: list[str] = []
+
+    if mode == "updated":
+        existing = corp.repo_groups[group_id].config
+        base_enabled_skills = list(existing.enabled_skills)
+        base_disabled_skills = list(existing.disabled_skills)
+        base_enabled_sources = list(existing.enabled_sources)
+        base_disabled_sources = list(existing.disabled_sources)
+
+    enabled_skills = merge_delta_values(base_enabled_skills, args.enable_skill, args.disable_skill)
+    disabled_skills = merge_delta_values(base_disabled_skills, args.disable_skill, args.enable_skill)
+    enabled_sources = merge_delta_values(base_enabled_sources, args.enable_source, args.disable_source)
+    disabled_sources = merge_delta_values(base_disabled_sources, args.disable_source, args.enable_source)
+    enabled_skills, disabled_skills = resolve_group_collisions(
+        args=args,
+        workspace=workspace,
+        machine_config=machine_config,
+        corp=corp,
+        user=user,
+        repo_id=repo_id,
+        group_id=group_id,
+        enabled_skills=enabled_skills,
+        disabled_skills=disabled_skills,
+        enabled_sources=enabled_sources,
+        disabled_sources=disabled_sources,
+        mode=mode,
+    )
+
+    if mode == "created":
+        config_path = register_repo_group(
+            machine_config.corp_repo_path,
+            group_id,
+            enabled_skills=enabled_skills or None,
+            disabled_skills=disabled_skills or None,
+            enabled_sources=enabled_sources or None,
+            disabled_sources=disabled_sources or None,
+        )
+    else:
+        config_path = update_repo_group_config(
+            corp.repo_groups[group_id].config.layer_path / "config.toml",
+            enabled_skills=enabled_skills,
+            disabled_skills=disabled_skills,
+            enabled_sources=enabled_sources,
+            disabled_sources=disabled_sources,
+        )
+
+    update_repo_config(
+        corp.repos[repo_id].config.layer_path / "config.toml",
+        repo_group_id=group_id,
+    )
+
+    synced = False
+    written: list[str] = []
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    if not args.no_sync:
+        summary = reseed(machine_config, corp, user, workspaces=[workspace], include_recent_workspaces=False)
+        synced_workspace = next((item for item in summary["workspaces"] if item["workspace"] == str(workspace)), None)
+        written = list(synced_workspace["written"]) if synced_workspace else []
+        synced = True
+    else:
+        reseed(machine_config, corp, user)
+
+    resolution = resolve_workspace(workspace, machine_config, corp, user)
+    group_layer = corp.repo_groups[group_id].config
+    effective = {
+        "enabled_skills": resolution.enabled_skills,
+        "enabled_sources": resolution.enabled_sources,
+    }
+    local_deltas = {
+        "enabled_skills": list(group_layer.enabled_skills),
+        "disabled_skills": list(group_layer.disabled_skills),
+        "enabled_sources": list(group_layer.enabled_sources),
+        "disabled_sources": list(group_layer.disabled_sources),
+    }
+    payload = {
+        "workspace": str(workspace),
+        "repo_id": repo_id,
+        "group_id": group_id,
+        "config_path": str(config_path),
+        "mode": mode,
+        "effective": effective,
+        "group_layer": local_deltas,
+        "synced": synced,
+        "written": written,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_complete_skill(args: argparse.Namespace) -> int:
+    machine_config = load_machine_config()
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    workspace = args.workspace.expanduser().resolve()
+    resolution = resolve_workspace(workspace, machine_config, corp, user)
+    skill_id = str(args.skill_id)
+    resolved = resolution.items.get(skill_id)
+    if resolved is None or resolved.item.kind != "skill":
+        raise TeamAgentsError(f"Active skill not found in this workspace: {skill_id}")
+    if resolved.item.usage_mode != "one-time":
+        raise TeamAgentsError(f"Skill is not marked one-time: {skill_id}")
+
+    scope: str
+    config_path: Path
+    if resolution.workspace_context.matched_repo_id:
+        repo_id = resolution.workspace_context.matched_repo_id
+        config = corp.repos[repo_id].config
+        config_path = update_repo_config(
+            config.layer_path / "config.toml",
+            enabled_skills=[item_id for item_id in config.enabled_skills if item_id != skill_id],
+            disabled_skills=merge_delta_values(config.disabled_skills, [skill_id], None),
+        )
+        scope = "repo"
+    else:
+        binding_path = resolution.workspace_context.git_root or workspace
+        binding = match_workspace_binding(binding_path, user.workspace_bindings)
+        if binding is None:
+            raise TeamAgentsError("No applicable repo or workspace binding found for one-time skill completion")
+        config_path = complete_binding_skill(machine_config.user_override_path / "config.toml", binding.path, skill_id)
+        scope = "binding"
+
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    summary = reseed(machine_config, corp, user, workspaces=[workspace], include_recent_workspaces=False)
+    synced_workspace = next((item for item in summary["workspaces"] if item["workspace"] == str(workspace)), None)
+    written = list(synced_workspace["written"]) if synced_workspace else []
+    resolution = resolve_workspace(workspace, machine_config, corp, user)
+    payload = {
+        "workspace": str(workspace),
+        "skill_id": skill_id,
+        "scope": scope,
+        "config_path": str(config_path),
+        "enabled_skills": resolution.enabled_skills,
+        "written": written,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
 def cmd_bind_workspace(args: argparse.Namespace) -> int:
     machine_config = load_machine_config()
     corp = load_corp_repo(machine_config.corp_repo_path)
@@ -525,6 +966,8 @@ def cmd_add_source(args: argparse.Namespace) -> int:
         namespace=args.namespace,
         repo_id=args.repo_id,
         enable=args.enable,
+        allow_parallel_pin=args.allow_parallel_pin,
+        update_existing_source_id=args.update_existing_source_id,
     )
     print(
         json.dumps(
@@ -704,11 +1147,29 @@ def add_source(
     namespace: str,
     repo_id: str | None,
     enable: bool,
+    allow_parallel_pin: bool = False,
+    update_existing_source_id: str | None = None,
 ) -> Path:
     if layer == "user":
-        manifest_path = register_user_source(user_override, source_id, url, commit, namespace)
+        manifest_path = register_user_source(
+            user_override,
+            source_id,
+            url,
+            commit,
+            namespace,
+            allow_parallel_pin=allow_parallel_pin,
+            update_existing_source_id=update_existing_source_id,
+        )
     else:
-        manifest_path = register_corp_source(corp_repo, source_id, url, commit, namespace)
+        manifest_path = register_corp_source(
+            corp_repo,
+            source_id,
+            url,
+            commit,
+            namespace,
+            allow_parallel_pin=allow_parallel_pin,
+            update_existing_source_id=update_existing_source_id,
+        )
     if enable:
         layer_root = resolve_layer_root(corp_repo, user_override, layer, repo_id=repo_id)
         enable_source_in_layer(layer_root, source_id)
@@ -841,6 +1302,304 @@ def prompt_repo_id(normalized_remotes: list[str], workspace: Path) -> str:
     return value or default
 
 
+def merge_delta_values(base: list[str], additions: list[str] | None, removals: list[str] | None) -> list[str]:
+    values = list(base)
+    for value in additions or []:
+        if value not in values:
+            values.append(value)
+    if removals:
+        values = [value for value in values if value not in removals]
+    return values
+
+
+def resolve_group_repo_target(*, args: argparse.Namespace, context, corp: CorpRepo) -> str:
+    if context.matched_repo_id:
+        return context.matched_repo_id
+    if getattr(args, "repo_id", None):
+        repo_id = str(args.repo_id)
+        if repo_id not in corp.repos:
+            raise TeamAgentsError(f"Unknown repo id: {repo_id}")
+        return repo_id
+    raise TeamAgentsError(
+        "Workspace does not match a configured repo. Run configure-repo first or pass an existing --repo-id."
+    )
+
+
+def resolve_group_target(*, args: argparse.Namespace, repo_config: LayerConfig, corp: CorpRepo, workspace: Path) -> tuple[str, str]:
+    if args.group_id:
+        if args.group_id in corp.repo_groups:
+            return str(args.group_id), "updated"
+        return str(args.group_id), "created"
+    if repo_config.repo_group_id:
+        return repo_config.repo_group_id, "updated"
+    if args.json:
+        raise TeamAgentsError("configure-group requires --group-id when the repo is not already linked to a repo-group")
+    default = derive_repo_id([], workspace)
+    value = input(f"Repo group id [{default}]: ").strip()
+    group_id = value or default
+    if group_id in corp.repo_groups:
+        return group_id, "updated"
+    return group_id, "created"
+
+
+def resolve_repo_collisions(
+    *,
+    args: argparse.Namespace,
+    workspace: Path,
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    user: UserOverrides,
+    repo_id: str,
+    repo_class: str,
+    repo_group_id: str | None,
+    normalized_remotes: list[str],
+    enabled_skills: list[str],
+    disabled_skills: list[str],
+    enabled_sources: list[str],
+    disabled_sources: list[str],
+    mode: str,
+) -> tuple[list[str], list[str]]:
+    while True:
+        simulated = simulate_repo_resolution(
+            workspace=workspace,
+            machine_config=machine_config,
+            corp=corp,
+            user=user,
+            repo_id=repo_id,
+            repo_class=repo_class,
+            repo_group_id=repo_group_id,
+            normalized_remotes=normalized_remotes,
+            enabled_skills=enabled_skills,
+            disabled_skills=disabled_skills,
+            enabled_sources=enabled_sources,
+            disabled_sources=disabled_sources,
+            mode=mode,
+        )
+        collisions = detect_skill_collisions(simulated)
+        if not collisions:
+            return enabled_skills, disabled_skills
+        if args.json:
+            raise TeamAgentsError(format_collision_error(collisions))
+        losers = prompt_collision_losers(collisions)
+        disabled_skills = merge_delta_values(disabled_skills, losers, None)
+        enabled_skills = [item_id for item_id in enabled_skills if item_id not in losers]
+
+
+def resolve_group_collisions(
+    *,
+    args: argparse.Namespace,
+    workspace: Path,
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    user: UserOverrides,
+    repo_id: str,
+    group_id: str,
+    enabled_skills: list[str],
+    disabled_skills: list[str],
+    enabled_sources: list[str],
+    disabled_sources: list[str],
+    mode: str,
+) -> tuple[list[str], list[str]]:
+    while True:
+        simulated = simulate_group_resolution(
+            workspace=workspace,
+            machine_config=machine_config,
+            corp=corp,
+            user=user,
+            repo_id=repo_id,
+            group_id=group_id,
+            enabled_skills=enabled_skills,
+            disabled_skills=disabled_skills,
+            enabled_sources=enabled_sources,
+            disabled_sources=disabled_sources,
+            mode=mode,
+        )
+        collisions = detect_skill_collisions(simulated)
+        if not collisions:
+            return enabled_skills, disabled_skills
+        if args.json:
+            raise TeamAgentsError(format_collision_error(collisions))
+        losers = prompt_collision_losers(collisions)
+        disabled_skills = merge_delta_values(disabled_skills, losers, None)
+        enabled_skills = [item_id for item_id in enabled_skills if item_id not in losers]
+
+
+def simulate_repo_resolution(
+    *,
+    workspace: Path,
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    user: UserOverrides,
+    repo_id: str,
+    repo_class: str,
+    repo_group_id: str | None,
+    normalized_remotes: list[str],
+    enabled_skills: list[str],
+    disabled_skills: list[str],
+    enabled_sources: list[str],
+    disabled_sources: list[str],
+    mode: str,
+) -> ResolutionResult:
+    corp_candidate = deepcopy(corp)
+    if mode == "created":
+        corp_candidate.repos[repo_id] = LayerData(
+            config=LayerConfig(
+                layer_name="repo",
+                layer_path=machine_config.corp_repo_path / "repos" / repo_id,
+                identifier=repo_id,
+                enabled_sources=list(enabled_sources),
+                disabled_sources=list(disabled_sources),
+                enabled_skills=list(enabled_skills),
+                disabled_skills=list(disabled_skills),
+                normalized_remotes=list(normalized_remotes),
+                repo_group_id=repo_group_id,
+                repo_class=repo_class,
+            ),
+            items={},
+        )
+    else:
+        config = corp_candidate.repos[repo_id].config
+        config.repo_class = repo_class
+        config.repo_group_id = repo_group_id
+        config.normalized_remotes = list(normalized_remotes)
+        config.enabled_skills = list(enabled_skills)
+        config.disabled_skills = list(disabled_skills)
+        config.enabled_sources = list(enabled_sources)
+        config.disabled_sources = list(disabled_sources)
+    return resolve_workspace(workspace, machine_config, corp_candidate, user)
+
+
+def simulate_group_resolution(
+    *,
+    workspace: Path,
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    user: UserOverrides,
+    repo_id: str,
+    group_id: str,
+    enabled_skills: list[str],
+    disabled_skills: list[str],
+    enabled_sources: list[str],
+    disabled_sources: list[str],
+    mode: str,
+) -> ResolutionResult:
+    corp_candidate = deepcopy(corp)
+    if mode == "created":
+        corp_candidate.repo_groups[group_id] = LayerData(
+            config=LayerConfig(
+                layer_name="repo-group",
+                layer_path=machine_config.corp_repo_path / "repo-groups" / group_id,
+                identifier=group_id,
+                enabled_sources=list(enabled_sources),
+                disabled_sources=list(disabled_sources),
+                enabled_skills=list(enabled_skills),
+                disabled_skills=list(disabled_skills),
+            ),
+            items={},
+        )
+    else:
+        config = corp_candidate.repo_groups[group_id].config
+        config.enabled_skills = list(enabled_skills)
+        config.disabled_skills = list(disabled_skills)
+        config.enabled_sources = list(enabled_sources)
+        config.disabled_sources = list(disabled_sources)
+    corp_candidate.repos[repo_id].config.repo_group_id = group_id
+    return resolve_workspace(workspace, machine_config, corp_candidate, user)
+
+
+def detect_skill_collisions(result: ResolutionResult) -> list[dict[str, object]]:
+    by_slug: dict[str, list] = {}
+    for resolved in result.items.values():
+        if resolved.item.kind != "skill" or not resolved.active:
+            continue
+        by_slug.setdefault(resolved.item.slug, []).append(resolved)
+    collisions: list[dict[str, object]] = []
+    for slug, resolved_items in sorted(by_slug.items()):
+        if len(resolved_items) < 2:
+            continue
+        overlapping_groups: list[list] = []
+        remaining = list(resolved_items)
+        while remaining:
+            current = [remaining.pop(0)]
+            current_tools = normalized_tool_targets(current[0].item)
+            changed = True
+            while changed:
+                changed = False
+                next_remaining = []
+                for candidate in remaining:
+                    candidate_tools = normalized_tool_targets(candidate.item)
+                    if tool_overlap(current_tools, candidate_tools):
+                        current.append(candidate)
+                        current_tools |= candidate_tools
+                        changed = True
+                    else:
+                        next_remaining.append(candidate)
+                remaining = next_remaining
+            overlapping_groups.append(current)
+        for group in overlapping_groups:
+            if len(group) < 2:
+                continue
+            collisions.append(
+                {
+                    "slug": slug,
+                    "items": [
+                        {
+                            "item_id": resolved.item.item_id,
+                            "title": resolved.item.title,
+                            "targets": sorted(normalized_tool_targets(resolved.item)),
+                        }
+                        for resolved in sorted(group, key=lambda value: value.item.item_id)
+                    ],
+                }
+            )
+    return collisions
+
+
+def normalized_tool_targets(item: Item) -> set[str]:
+    known = {"claude", "codex", "cursor"}
+    if not item.target_tools:
+        return set(known)
+    return {tool for tool in item.target_tools if tool in known}
+
+
+def tool_overlap(left: set[str], right: set[str]) -> bool:
+    if not left or not right:
+        return False
+    return bool(left.intersection(right))
+
+
+def format_collision_error(collisions: list[dict[str, object]]) -> str:
+    parts = []
+    for collision in collisions:
+        items = ", ".join(
+            f"{item['item_id']}[{','.join(item['targets']) or 'none'}]"
+            for item in collision["items"]
+        )
+        parts.append(f"slug {collision['slug']}: {items}")
+    return (
+        "Skill emission collisions must be resolved before apply: "
+        + "; ".join(parts)
+        + ". Disable one of the colliding skills at repo scope."
+    )
+
+
+def prompt_collision_losers(collisions: list[dict[str, object]]) -> list[str]:
+    losers: list[str] = []
+    for collision in collisions:
+        print(f"Collision for slug {collision['slug']}:", file=sys.stderr)
+        for item in collision["items"]:
+            targets = ",".join(item["targets"]) or "none"
+            print(f"- {item['item_id']} [{targets}] {item['title']}", file=sys.stderr)
+        winner = input("Winner item id: ").strip()
+        candidate_ids = {item["item_id"] for item in collision["items"]}
+        if winner not in candidate_ids:
+            raise TeamAgentsError(f"Unknown winner for collision {collision['slug']}: {winner}")
+        for item in collision["items"]:
+            if item["item_id"] != winner and item["item_id"] not in losers:
+                losers.append(item["item_id"])
+    return losers
+
+
 def prompt_repo_class() -> str:
     default = "internal"
     while True:
@@ -860,6 +1619,89 @@ def prompt_repo_group_id(corp: CorpRepo) -> str | None:
         print(f"- {repo_group_id}", file=sys.stderr)
     value = input("Repo group id [none]: ").strip()
     return value or None
+
+
+def prompt_attach_action() -> str:
+    print("Attach options:", file=sys.stderr)
+    print("- repo", file=sys.stderr)
+    print("- group", file=sys.stderr)
+    print("- baseline", file=sys.stderr)
+    print("- configure", file=sys.stderr)
+    while True:
+        value = input("Attach mode (repo/group/baseline/configure) [baseline]: ").strip().lower()
+        if not value:
+            return "baseline"
+        if value in {"repo", "group", "baseline", "configure"}:
+            return value
+        print("Enter 'repo', 'group', 'baseline', or 'configure'.", file=sys.stderr)
+
+
+def ranked_repo_ids(corp: CorpRepo, *, workspace: Path, normalized_remotes: list[str]) -> list[str]:
+    default_id = derive_repo_id(normalized_remotes, workspace)
+    return sorted(
+        corp.repos,
+        key=lambda repo_id: (
+            0 if repo_id == default_id else 1 if default_id in repo_id or repo_id in default_id else 2,
+            repo_id,
+        ),
+    )
+
+
+def prompt_candidate_id(label: str, candidates: list[str]) -> str:
+    if not candidates:
+        raise TeamAgentsError(f"No {label} candidates are configured")
+    while True:
+        search = input(f"Search {label} ids [show all]: ").strip().lower()
+        filtered = [candidate for candidate in candidates if not search or search in candidate.lower()]
+        if not filtered:
+            print(f"No {label} ids match that search.", file=sys.stderr)
+            continue
+        print(f"Available {label} ids:", file=sys.stderr)
+        for candidate in filtered:
+            print(f"- {candidate}", file=sys.stderr)
+        value = input(f"{label} id: ").strip()
+        if value in filtered:
+            return value
+        if value in candidates:
+            return value
+        print(f"Choose a listed {label} id.", file=sys.stderr)
+
+
+def build_bind_args_for_attach(corp: CorpRepo, path: Path) -> argparse.Namespace:
+    name = prompt_workspace_name(path)
+    repo_id, repo_group_id = prompt_workspace_target(corp)
+    return argparse.Namespace(
+        path=path,
+        name=name,
+        repo_id=repo_id,
+        repo_group_id=repo_group_id,
+        no_sync=False,
+        json=False,
+    )
+
+
+def complete_binding_skill(config_path: Path, binding_path: Path, skill_id: str) -> Path:
+    data = read_toml(config_path)
+    bindings = data.get("workspace_binding", [])
+    if not isinstance(bindings, list):
+        raise TeamAgentsError(f"workspace_binding must be a list in {config_path}")
+    updated = False
+    normalized_binding_path = binding_path.expanduser().resolve()
+    for entry in bindings:
+        entry_path = Path(str(entry.get("path", ""))).expanduser().resolve()
+        if entry_path != normalized_binding_path:
+            continue
+        disabled_skills = [str(item) for item in entry.get("disabled_skills", [])]
+        if skill_id not in disabled_skills:
+            disabled_skills.append(skill_id)
+        entry["disabled_skills"] = disabled_skills
+        updated = True
+        break
+    if not updated:
+        raise TeamAgentsError(f"Workspace binding not found for {binding_path}")
+    data["workspace_binding"] = bindings
+    write_toml_document(config_path, data)
+    return config_path
 
 
 def validate_repo_group_id(repo_group_id: str | None, corp: CorpRepo) -> None:

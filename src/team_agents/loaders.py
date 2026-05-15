@@ -112,6 +112,8 @@ def load_items(
         if not base.exists():
             continue
         for item_dir in sorted(path for path in base.iterdir() if path.is_dir()):
+            if allow_native_source_formats and not (item_dir / "item.toml").exists():
+                continue
             item = load_item(item_dir, kind, source_type, source_namespace)
             if item.item_id in items:
                 raise ValidationError(f"Duplicate canonical id in layer {layer_root}: {item.item_id}")
@@ -166,6 +168,7 @@ def load_item(item_dir: Path, expected_kind: str, source_type: str, source_names
         cursor_globs=_str_list(raw.get("cursor_globs")),
         cursor_always_apply=raw.get("cursor_always_apply"),
         policy_rules=list(raw.get("policy_rules", [])),
+        usage_mode=str(raw.get("usage_mode", "reusable")),
     )
     return item
 
@@ -176,11 +179,8 @@ def layer_root_ref(path: Path) -> str:
 
 def load_claude_native_items(layer_root: Path, source_type: str, source_namespace: str) -> dict[str, Item]:
     items: dict[str, Item] = {}
-    for skill_dir in sorted(path for path in layer_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
-            continue
-        slug = skill_dir.name
+    for skill_md in iter_claude_native_skill_files(layer_root):
+        slug = skill_md.parent.name
         raw_text = skill_md.read_text(encoding="utf-8")
         metadata, _ = parse_frontmatter_document(raw_text, skill_md)
         name = str(metadata.get("name") or "").strip()
@@ -204,8 +204,37 @@ def load_claude_native_items(layer_root: Path, source_type: str, source_namespac
             body_path=skill_md,
             target_tools=[str(tool) for tool in tools],
             claude_model=str(metadata["model"]) if metadata.get("model") else None,
+            usage_mode=str(metadata.get("usage_mode", "reusable")),
         )
     return items
+
+
+def iter_claude_native_skill_files(layer_root: Path) -> list[Path]:
+    seen: set[Path] = set()
+    skill_files: list[Path] = []
+
+    def add(skill_md: Path) -> None:
+        resolved = skill_md.resolve()
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        skill_files.append(skill_md)
+
+    for skill_dir in sorted(path for path in layer_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.exists():
+            add(skill_md)
+
+    for relative_root in ("skills", ".claude/skills", ".agents/skills"):
+        native_root = layer_root / relative_root
+        if not native_root.exists():
+            continue
+        for skill_md in sorted(native_root.rglob("SKILL.md")):
+            if any(part == "deprecated" for part in skill_md.relative_to(native_root).parts):
+                continue
+            add(skill_md)
+
+    return skill_files
 
 
 def load_cursor_native_items(layer_root: Path, source_type: str, source_namespace: str) -> dict[str, Item]:
@@ -243,6 +272,7 @@ def load_cursor_native_items(layer_root: Path, source_type: str, source_namespac
             cursor_globs=[str(glob) for glob in globs],
             cursor_always_apply=always_apply,
             source_note=description,
+            usage_mode=str(metadata.get("usage_mode", "reusable")),
         )
     return items
 
@@ -361,6 +391,7 @@ def parse_workspace_bindings(entries: Any, root: Path) -> list[WorkspaceBinding]
                 path=Path(str(entry["path"])).expanduser().resolve(),
                 repo_id=entry.get("repo_id"),
                 repo_group_id=entry.get("repo_group_id"),
+                disabled_skills=_str_list(entry.get("disabled_skills")),
             )
         )
     return bindings

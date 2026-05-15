@@ -56,7 +56,14 @@ def seed_user_global_outputs(machine_config: MachineConfig, user_root: Path, ski
 
 def seed_claude_user_skills(root: Path, skill_items: list[Item]) -> list[Path]:
     claude_root = Path.home() / ".claude" / "skills"
+    normalize_claude_skills_root(claude_root)
     claude_root.mkdir(parents=True, exist_ok=True)
+    desired_slugs = {
+        item.slug
+        for item in skill_items
+        if not item.target_tools or "claude" in item.target_tools
+    }
+    prune_stale_claude_user_skills(root, claude_root, desired_slugs)
     written: list[Path] = []
     for item in skill_items:
         if item.target_tools and "claude" not in item.target_tools:
@@ -85,6 +92,12 @@ def seed_codex_user_router(root: Path, skill_items: list[Item]) -> list[Path]:
 def seed_cursor_user_rules(root: Path, skill_items: list[Item]) -> list[Path]:
     cursor_root = Path.home() / ".cursor" / "rules"
     cursor_root.mkdir(parents=True, exist_ok=True)
+    desired_slugs = {
+        item.slug
+        for item in skill_items
+        if not item.target_tools or "cursor" in item.target_tools
+    }
+    prune_stale_cursor_user_rules(root, cursor_root, desired_slugs)
     written: list[Path] = []
     for item in skill_items:
         if item.target_tools and "cursor" not in item.target_tools:
@@ -108,6 +121,47 @@ def write_cursor_library_rule(root: Path, item: Item) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_cursor_rule(item), encoding="utf-8")
     return path
+
+
+def prune_stale_claude_user_skills(root: Path, claude_root: Path, desired_slugs: set[str]) -> None:
+    rendered_root = (root / "rendered" / "claude" / "skills").resolve()
+    legacy_root = (Path.home() / ".agents" / "skills").resolve()
+    for skill_dir in sorted(path for path in claude_root.iterdir() if path.is_dir()):
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_symlink():
+            continue
+        target = skill_md.resolve()
+        managed = _is_within(target, rendered_root) or _is_within(target, legacy_root)
+        if managed and skill_dir.name not in desired_slugs:
+            shutil.rmtree(skill_dir)
+
+
+def normalize_claude_skills_root(claude_root: Path) -> None:
+    legacy_root = (Path.home() / ".agents" / "skills").resolve()
+    if not claude_root.is_symlink():
+        return
+    target = claude_root.resolve()
+    if _is_within(target, legacy_root) or target == legacy_root:
+        claude_root.unlink()
+
+
+def prune_stale_cursor_user_rules(root: Path, cursor_root: Path, desired_slugs: set[str]) -> None:
+    rendered_root = (root / "rendered" / "cursor" / "rules").resolve()
+    for rule_path in sorted(cursor_root.glob("*.mdc")):
+        if not rule_path.is_symlink():
+            continue
+        target = rule_path.resolve()
+        managed = _is_within(target, rendered_root)
+        if managed and rule_path.stem not in desired_slugs:
+            rule_path.unlink()
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def render_codex_section(root: Path, item: Item) -> str:

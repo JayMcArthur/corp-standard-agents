@@ -1,5 +1,4 @@
 id = "client-tracked"
-normalized_remotes = ["github.com/acme/client-tracked"]
+normalized_remotes = ["git.example.test/demo/client-tracked"]
 repo_class = "client"
-enabled_skills = ["corp.shadowknight.skill.shell-global"]
-
+enabled_skills = ["corp.shadowknight.skill.recursive-planning"]
