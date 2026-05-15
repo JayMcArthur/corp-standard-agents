@@ -1,0 +1,10 @@
+id = "alice"
+enabled_sources = []
+disabled_sources = []
+enabled_skills = ["user.alice.skill.personal-shell"]
+disabled_skills = []
+optional_policies = []
+disabled_optional_policies = []
+docs = []
+disabled_docs = []
+preferred_agent_types = ["local-helper"]

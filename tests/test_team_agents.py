@@ -590,6 +590,32 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn(f'path = "{self.unknown_repo.resolve()}"', config)
         self.assertIn('repo_id = "internal-app"', config)
 
+    def test_attach_unresolved_repo_supports_noninteractive_repo_mode_in_json(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "attach",
+                    "--workspace",
+                    str(self.unknown_repo),
+                    "--mode",
+                    "repo",
+                    "--repo-id",
+                    "internal-app",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["repo_id"], "internal-app")
+        self.assertTrue(payload["synced"])
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
+        self.assertEqual(resolution.workspace_context.matched_repo_id, "internal-app")
+
     def test_attach_unresolved_repo_can_bind_to_existing_group(self) -> None:
         machine = self.configure_machine()
         stdout = StringIO()
@@ -646,6 +672,16 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertTrue(personal_shell.startswith("---\nname: "))
         self.assertIn('description: "Personal shell body"', personal_shell)
         self.assertIn("Personal shell body", personal_shell)
+
+    def test_sync_prunes_stale_workspace_skill_outputs(self) -> None:
+        machine = self.configure_machine()
+        stale_skill = self.internal_repo / ".agents" / "skills" / "obsidian-vault" / "SKILL.md"
+        write(stale_skill, "stale body")
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        write_sync_output(result)
+        self.assertFalse(stale_skill.exists())
 
     def test_sync_client_repo_fails_on_corp_private_skill(self) -> None:
         machine = self.configure_machine()
@@ -1030,6 +1066,11 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("Shell global body", global_skill)
         self.assertIn("Shell global body", workspace_skill)
 
+    def test_setup_user_global_outputs_do_not_include_unknown_workspace_onboarding_skill(self) -> None:
+        self.configure_machine()
+        self.assertFalse((self.home / ".claude" / "skills" / "repo-onboarding" / "SKILL.md").exists())
+        self.assertFalse((self.home / ".cursor" / "rules" / "repo-onboarding.mdc").exists())
+
     def test_setup_can_import_codex_skills_into_org_layer(self) -> None:
         source_root = self.root / "codex-skills"
         write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
@@ -1113,6 +1154,9 @@ class TeamAgentsTests(unittest.TestCase):
         result = main(["refresh-personal-skills", "--source", str(source_root)])
         self.assertEqual(result, 0)
         self.assertTrue((machine.user_override_path / "skills" / "reviewer").exists())
+        user_config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("user.local.skill.personal-shell", user_config)
+        self.assertNotIn("user.local.skill.reviewer", user_config)
 
         (source_root / "reviewer" / "SKILL.md").unlink()
         write(source_root / "linter" / "SKILL.md", "# Linter")
@@ -1122,7 +1166,16 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertFalse((machine.user_override_path / "skills" / "reviewer").exists())
         self.assertTrue((machine.user_override_path / "skills" / "linter").exists())
         self.assertNotIn("user.local.skill.reviewer", user_config)
-        self.assertIn("user.local.skill.linter", user_config)
+        self.assertNotIn("user.local.skill.linter", user_config)
+
+    def test_refresh_personal_skills_can_opt_in_to_enable_imported_skills(self) -> None:
+        machine = self.configure_machine()
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
+        result = main(["refresh-personal-skills", "--source", str(source_root), "--enable-imported"])
+        self.assertEqual(result, 0)
+        user_config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("user.local.skill.reviewer", user_config)
 
     def test_onboard_repo_registers_repo_group_and_syncs(self) -> None:
         self.configure_machine()
@@ -1229,6 +1282,10 @@ class TeamAgentsTests(unittest.TestCase):
                     "corp.shadowknight.skill.shell-global",
                     "--disable-source",
                     "shared-ext",
+                    "--enable-doc",
+                    "corp.shadowknight.doc.internal-runbook",
+                    "--recommended-agent-type",
+                    "planner",
                     "--json",
                 ]
             )
@@ -1237,14 +1294,20 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("corp.shadowknight.skill.internal-ops", payload["repo_layer"]["enabled_skills"])
         self.assertIn("corp.shadowknight.skill.shell-global", payload["repo_layer"]["disabled_skills"])
         self.assertIn("shared-ext", payload["repo_layer"]["disabled_sources"])
+        self.assertIn("corp.shadowknight.doc.internal-runbook", payload["repo_layer"]["docs"])
+        self.assertIn("planner", payload["repo_layer"]["recommended_agent_types"])
         self.assertIn("corp.shadowknight.skill.internal-ops", payload["effective"]["enabled_skills"])
         self.assertNotIn("corp.shadowknight.skill.shell-global", payload["effective"]["enabled_skills"])
         self.assertNotIn("shared-ext", payload["effective"]["enabled_sources"])
+        self.assertIn("corp.shadowknight.doc.internal-runbook", payload["effective"]["docs"])
+        self.assertIn("planner", payload["effective"]["recommended_agent_types"])
 
         config = (machine.corp_repo_path / "repos" / "internal-alt" / "config.toml").read_text(encoding="utf-8")
         self.assertIn('enabled_skills = ["corp.shadowknight.skill.internal-ops"]', config)
         self.assertIn('disabled_skills = ["corp.shadowknight.skill.shell-global"]', config)
         self.assertIn('disabled_sources = ["shared-ext"]', config)
+        self.assertIn('docs = ["corp.shadowknight.doc.internal-runbook"]', config)
+        self.assertIn('recommended_agent_types = ["planner"]', config)
         self.assertNotIn("corp.shadowknight.skill.platform-shared", config)
 
     def test_configure_repo_rejects_overlapping_skill_slug_collision_in_json_mode(self) -> None:
@@ -1440,8 +1503,14 @@ class TeamAgentsTests(unittest.TestCase):
                     "corp.shadowknight.skill.internal-ops",
                     "--disable-skill",
                     "corp.shadowknight.skill.platform-shared",
+                    "--enable-policy",
+                    "external.shared.policy.ext-policy",
                     "--enable-source",
                     "shared-ext",
+                    "--enable-doc",
+                    "corp.shadowknight.doc.internal-runbook",
+                    "--recommended-agent-type",
+                    "planner",
                     "--json",
                 ]
             )
@@ -1451,15 +1520,63 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(payload["group_id"], "platform")
         self.assertIn("corp.shadowknight.skill.internal-ops", payload["group_layer"]["enabled_skills"])
         self.assertIn("corp.shadowknight.skill.platform-shared", payload["group_layer"]["disabled_skills"])
+        self.assertIn("external.shared.policy.ext-policy", payload["group_layer"]["optional_policies"])
         self.assertIn("shared-ext", payload["group_layer"]["enabled_sources"])
+        self.assertIn("corp.shadowknight.doc.internal-runbook", payload["group_layer"]["docs"])
+        self.assertIn("planner", payload["group_layer"]["recommended_agent_types"])
         self.assertIn("corp.shadowknight.skill.internal-ops", payload["effective"]["enabled_skills"])
         self.assertNotIn("corp.shadowknight.skill.platform-shared", payload["effective"]["enabled_skills"])
+        self.assertIn("external.shared.policy.ext-policy", payload["effective"]["optional_policies"])
         self.assertIn("shared-ext", payload["effective"]["enabled_sources"])
+        self.assertIn("corp.shadowknight.doc.internal-runbook", payload["effective"]["docs"])
+        self.assertIn("planner", payload["effective"]["recommended_agent_types"])
 
         group_config = (machine.corp_repo_path / "repo-groups" / "platform" / "config.toml").read_text(encoding="utf-8")
         self.assertIn('enabled_skills = ["corp.shadowknight.skill.internal-ops"]', group_config)
         self.assertIn('disabled_skills = ["corp.shadowknight.skill.platform-shared"]', group_config)
+        self.assertIn('optional_policies = ["external.shared.policy.ext-policy"]', group_config)
         self.assertIn('enabled_sources = ["shared-ext"]', group_config)
+        self.assertIn("corp.shadowknight.doc.platform-map", group_config)
+        self.assertIn("corp.shadowknight.doc.internal-runbook", group_config)
+        self.assertIn('recommended_agent_types = ["planner"]', group_config)
+
+    def test_configure_org_updates_defaults_and_unknown_workspace_baseline(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-org",
+                    "--disable-skill",
+                    "corp.shadowknight.skill.shell-global",
+                    "--enable-skill",
+                    "corp.shadowknight.skill.internal-ops",
+                    "--minimal-disable-skill",
+                    "corp.shadowknight.skill.shell-global",
+                    "--minimal-enable-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["synced"])
+        self.assertIn("corp.shadowknight.skill.internal-ops", payload["org_layer"]["enabled_skills"])
+        self.assertNotIn("corp.shadowknight.skill.shell-global", payload["org_layer"]["enabled_skills"])
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", payload["org_layer"]["minimal_enabled_skills"])
+        self.assertNotIn("corp.shadowknight.skill.shell-global", payload["org_layer"]["minimal_enabled_skills"])
+
+        org_config = (self.corp_repo / "org" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn('enabled_skills = ["corp.shadowknight.skill.internal-ops"]', org_config)
+        self.assertIn('minimal_enabled_skills = ["corp.shadowknight.skill.repo-onboarding"]', org_config)
+
+        machine = load_machine_config()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_overrides(machine.user_override_path)
+        unknown_result = resolve_workspace(self.unknown_repo, machine, corp, user)
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", unknown_result.enabled_skills)
+        self.assertNotIn("corp.shadowknight.skill.shell-global", unknown_result.enabled_skills)
 
     def test_complete_skill_disables_one_time_skill_at_repo_scope(self) -> None:
         machine = self.configure_machine()

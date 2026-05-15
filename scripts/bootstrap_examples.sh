@@ -7,15 +7,13 @@ RUNTIME_ROOT="${1:-/tmp/team-agents-example-env}"
 HOME_ROOT="$RUNTIME_ROOT/home"
 WORKSPACES_ROOT="$RUNTIME_ROOT/workspaces"
 CORP_RUNTIME="$RUNTIME_ROOT/corp-control"
-USER_RUNTIME="$RUNTIME_ROOT/user-overrides"
 EXTERNAL_RUNTIME="$RUNTIME_ROOT/external-source"
 VENV_ROOT="$RUNTIME_ROOT/.venv"
 
 mkdir -p "$RUNTIME_ROOT" "$HOME_ROOT" "$WORKSPACES_ROOT"
-rm -rf "$CORP_RUNTIME" "$USER_RUNTIME" "$EXTERNAL_RUNTIME" "$VENV_ROOT" "$WORKSPACES_ROOT"
+rm -rf "$CORP_RUNTIME" "$EXTERNAL_RUNTIME" "$VENV_ROOT" "$WORKSPACES_ROOT"
 mkdir -p "$WORKSPACES_ROOT"
 cp -R "$EXAMPLES_ROOT/corp-control" "$CORP_RUNTIME"
-cp -R "$EXAMPLES_ROOT/user-overrides" "$USER_RUNTIME"
 cp -R "$EXAMPLES_ROOT/external-source" "$EXTERNAL_RUNTIME"
 
 git -C "$EXTERNAL_RUNTIME" init >/dev/null
@@ -59,12 +57,12 @@ init_repo() {
   git -C "$repo_path" remote add origin "$remote_url"
 }
 
-init_repo "$WORKSPACES_ROOT/internal-app" "git@github.com:acme/internal-app.git"
-init_repo "$WORKSPACES_ROOT/client-private" "https://github.com/acme/client-private.git"
-init_repo "$WORKSPACES_ROOT/client-tracked" "https://github.com/acme/client-tracked.git" "Tracked client agents"
-init_repo "$WORKSPACES_ROOT/unknown-repo" "https://github.com/acme/unknown.git"
+init_repo "$WORKSPACES_ROOT/internal-app" "git@git.example.test:demo/internal-app.git"
+init_repo "$WORKSPACES_ROOT/client-private" "https://git.example.test/demo/client-private.git"
+init_repo "$WORKSPACES_ROOT/client-tracked" "https://git.example.test/demo/client-tracked.git" "Tracked client agents"
+init_repo "$WORKSPACES_ROOT/unknown-repo" "https://git.example.test/demo/unknown.git"
 
-cat >> "$USER_RUNTIME/config.toml" <<EOF
+cat >> "$CORP_RUNTIME/users/alice/config.toml" <<EOF
 
 [[workspace_binding]]
 name = "example-non-git"
@@ -75,7 +73,7 @@ EOF
 python3 -m venv "$VENV_ROOT"
 HOME="$HOME_ROOT" PYTHONPATH="$ROOT/src" "$VENV_ROOT/bin/python" -m team_agents setup \
   --corp-repo "$CORP_RUNTIME" \
-  --user-overrides "$USER_RUNTIME" \
+  --user "alice" \
   --cache-root "$HOME_ROOT/.team-agents/cache"
 
 cat <<EOF

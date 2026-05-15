@@ -61,6 +61,7 @@ def update_repo_config(
     repo_group_id: str | None = None,
     enabled_skills: list[str] | None = None,
     optional_policies: list[str] | None = None,
+    disabled_optional_policies: list[str] | None = None,
     docs: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
@@ -81,6 +82,8 @@ def update_repo_config(
         data["enabled_skills"] = enabled_skills
     if optional_policies is not None:
         data["optional_policies"] = optional_policies
+    if disabled_optional_policies is not None:
+        data["disabled_optional_policies"] = disabled_optional_policies
     if docs is not None:
         data["docs"] = docs
     if recommended_agent_types is not None:

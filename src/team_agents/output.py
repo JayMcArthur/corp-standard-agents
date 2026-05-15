@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 from team_agents.errors import ProtectionError, ResolutionError
@@ -30,6 +31,7 @@ def write_sync_output(result: ResolutionResult) -> list[Path]:
     agents_dir = workspace_root / ".agents"
     paths: list[Path] = []
     agents_dir.mkdir(parents=True, exist_ok=True)
+    prune_stale_item_outputs(agents_dir)
     paths.append(write_index_md(result, agents_dir))
     paths.append(write_resolution_json(result, agents_dir))
     paths.extend(write_item_outputs(result, agents_dir, repo_class))
@@ -124,6 +126,13 @@ def write_item_outputs(result: ResolutionResult, agents_dir: Path, repo_class: s
         path.write_text(content, encoding="utf-8")
         written.append(path)
     return written
+
+
+def prune_stale_item_outputs(agents_dir: Path) -> None:
+    for name in ["skills", "policies", "docs"]:
+        target = agents_dir / name
+        if target.exists():
+            shutil.rmtree(target)
 
 
 def render_output_body(item: Item) -> str:

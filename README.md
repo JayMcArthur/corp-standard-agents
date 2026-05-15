@@ -25,6 +25,14 @@ To remove the wrapper and virtualenv without deleting local state:
 bash scripts/uninstall.sh
 ```
 
+## Onboarding Model
+
+The product has three main onboarding stories:
+
+- corp onboarding: create or shape the control repo with `init-corp-repo` and `configure-org`
+- person onboarding: join an existing corp with `setup --corp-repo ... --user ...`
+- repo onboarding: attach to an existing repo with `attach`, or shape repo/group defaults with `configure-repo` and `configure-group`
+
 ## Official Flow
 
 The product has four primary commands:
@@ -38,6 +46,7 @@ Role model:
 - most users run `attach`
 - repo owners run `configure-repo`
 - shared/team leads run `configure-group`
+- corp maintainers run `configure-org`
 - one-time setup skills are hidden locally with `complete-skill`
 
 Everyday path after cloning a repo:
@@ -58,12 +67,22 @@ If the location is unresolved, `attach` guides you to:
 
 ## Owner Flows
 
+Configure org-wide defaults in the control repo:
+
+```bash
+team-agents configure-org --corp-repo /path/to/corp-control --enable-skill corp.example-org.skill.recursive-planning
+team-agents configure-org --corp-repo /path/to/corp-control --minimal-enable-skill corp.example-org.skill.repo-onboarding
+team-agents configure-org --corp-repo /path/to/corp-control --recommended-agent-type shell
+```
+
 Configure repo-layer defaults from the current repo:
 
 ```bash
 team-agents configure-repo --workspace /path/to/repo --repo-class internal
 team-agents configure-repo --workspace /path/to/repo --enable-skill corp.example-org.skill.recursive-planning
 team-agents configure-repo --workspace /path/to/repo --disable-source shared-ext
+team-agents configure-repo --workspace /path/to/repo --enable-doc corp.example-org.doc.internal-runbook
+team-agents configure-repo --workspace /path/to/repo --recommended-agent-type local-helper
 ```
 
 Configure or relink a shared repo-group from inside a repo:
@@ -72,6 +91,8 @@ Configure or relink a shared repo-group from inside a repo:
 team-agents configure-group --workspace /path/to/repo --group-id platform
 team-agents configure-group --workspace /path/to/repo --enable-source shared-ext
 team-agents configure-group --workspace /path/to/repo --disable-skill corp.example-org.skill.recursive-planning
+team-agents configure-group --workspace /path/to/repo --enable-doc corp.example-org.doc.platform-map
+team-agents configure-group --workspace /path/to/repo --recommended-agent-type planner
 ```
 
 Mark a one-time setup skill complete for just this repo or bound path:
@@ -86,6 +107,34 @@ Behavior rules:
 - colliding emitted skills must be resolved explicitly before apply
 - one-time skills are suppressed locally after completion; they are not deleted upstream
 
+## Person Onboarding
+
+Join an existing corp from a fresh machine:
+
+```bash
+bash scripts/install.sh
+team-agents setup --corp-repo /path/to/corp-control --user alice
+team-agents attach
+```
+
+Default behavior:
+- the user profile lives under `corp-control/users/<username>/`
+- `setup --user` creates the profile if it does not exist yet
+- a starter `personal-shell` skill is seeded for that user
+- imported personal skills are not auto-enabled unless you opt in
+
+To re-import personal skills from another local skill tree without enabling them all:
+
+```bash
+team-agents refresh-personal-skills --source ~/.agents/skills
+```
+
+To re-import and also enable imported skills at user scope:
+
+```bash
+team-agents refresh-personal-skills --source ~/.agents/skills --enable-imported
+```
+
 ## Full Command Surface
 
 ```bash
@@ -99,6 +148,7 @@ team-agents context --workspace /path/to/repo --pretty
 team-agents status --workspace /path/to/repo --json
 team-agents doctor --workspace /path/to/repo
 team-agents update
+team-agents configure-org --corp-repo /path/to/corp-control --enable-skill corp.example-org.skill.recursive-planning
 team-agents configure-repo --workspace /path/to/repo --repo-class internal
 team-agents configure-group --workspace /path/to/repo --group-id platform
 team-agents complete-skill corp.example-org.skill.repo-onboarding --workspace /path/to/repo
@@ -107,7 +157,6 @@ team-agents bind-workspace --path /path/to/non-git-workspace --repo-group-id pla
 team-agents refresh-personal-skills --source ~/.agents/skills
 team-agents migrate-user-overrides --user alice --corp-repo /path/to/corp-control
 team-agents init-corp-repo --dest /path/to/new-corp-control
-team-agents init-user-overrides --dest /path/to/new-user-overrides
 team-agents bootstrap-import --source ~/.agents/skills --dest /path/to/corp-control/users/alice
 team-agents promote-skills --from-layer user --to-layer org --all-imported
 team-agents add-source --layer org --source-id shared-ext --url /path/or/git/url --commit <sha> --namespace shared --enable
@@ -154,7 +203,7 @@ The active PRD is GitHub issue `#1`: `PRD: team-agents v1 — symlink library, c
 
 The files under `docs/requirements/` are historical and must not be treated as the current source of truth unless they are explicitly rewritten to match the PRD and issue backlog.
 
-Authoring rules for corp repos and user overrides live in [docs/authoring-guide.md](/home/jay/dev/Tools/corporate_standardized_agents/docs/authoring-guide.md:1).
+Authoring rules for corp repos and corp-resident user profiles live in [docs/authoring-guide.md](/home/jay/dev/Tools/corporate_standardized_agents/docs/authoring-guide.md:1).
 
 ## Output
 
@@ -193,9 +242,10 @@ org -> repo-group -> repo -> user
 ```
 
 Editing commands target one layer only:
+- `configure-org` edits org defaults
 - `configure-group` edits repo-group deltas
 - `configure-repo` edits repo deltas
-- user overrides stay separate
+- the user layer stays separate
 
 Bindings are narrower than layers:
 - non-git or explicitly attached paths can bind to a repo or repo-group
@@ -227,7 +277,12 @@ Policy items can carry structured `policy_rules` in `item.toml`. `team-agents do
 
 ## Example Bootstrap
 
-The repo includes a checked-in example control repo, user override layer, and upstream external source under [examples/](/home/jay/dev/Tools/corporate_standardized_agents/examples).
+The repo includes a checked-in example control repo, corp-resident user profile, and upstream external source under [examples/](/home/jay/dev/Tools/corporate_standardized_agents/examples).
+The example set models:
+- a real corp baseline
+- a real person profile under `users/alice/`
+- a shared repo-group
+- a repo with repo-only external skills
 
 To materialize disposable local workspaces and machine config:
 

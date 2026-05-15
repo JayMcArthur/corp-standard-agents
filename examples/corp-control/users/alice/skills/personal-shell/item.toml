@@ -1,5 +1,4 @@
-id = "user.local.skill.personal-shell"
+id = "user.alice.skill.personal-shell"
 kind = "skill"
 title = "Personal Shell"
 privacy = "repo-safe"
-

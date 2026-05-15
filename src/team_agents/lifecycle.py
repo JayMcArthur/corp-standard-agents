@@ -11,7 +11,7 @@ from team_agents.library import ensure_external_library_checkout, library_root, 
 from team_agents.loaders import load_corp_repo, load_user_overrides
 from team_agents.models import CorpRepo, MachineConfig, ResolutionResult, SourceRef, UserOverrides
 from team_agents.output import write_sync_output
-from team_agents.resolution import resolve_workspace
+from team_agents.resolution import resolve_user_global, resolve_workspace
 from team_agents.sources import materialize_source
 
 
@@ -114,7 +114,7 @@ def reseed(
     include_recent_workspaces: bool = True,
 ) -> dict[str, object]:
     root = seed_library(machine_config, user.root)
-    global_result = resolve_workspace(machine_config.cache_root.parent, machine_config, corp, user)
+    global_result = resolve_user_global(machine_config, corp, user)
     active_sources = dict(global_result.source_details)
     for source_ref in global_result.source_details.values():
         ensure_external_library_checkout(root, source_ref)

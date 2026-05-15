@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach = subparsers.add_parser("attach")
     attach.add_argument("--workspace", type=Path, default=Path.cwd())
+    attach.add_argument("--mode", choices=["repo", "group", "baseline", "configure"])
+    attach.add_argument("--repo-id")
+    attach.add_argument("--repo-group-id")
+    attach.add_argument("--binding-name")
     attach.add_argument("--json", action="store_true")
     attach.set_defaults(func=cmd_attach)
 
@@ -139,8 +143,13 @@ def build_parser() -> argparse.ArgumentParser:
     configure_repo.add_argument("--repo-group-id")
     configure_repo.add_argument("--enable-skill", action="append")
     configure_repo.add_argument("--disable-skill", action="append")
+    configure_repo.add_argument("--enable-policy", action="append")
+    configure_repo.add_argument("--disable-policy", action="append")
     configure_repo.add_argument("--enable-source", action="append")
     configure_repo.add_argument("--disable-source", action="append")
+    configure_repo.add_argument("--enable-doc", action="append")
+    configure_repo.add_argument("--disable-doc", action="append")
+    configure_repo.add_argument("--recommended-agent-type", action="append")
     configure_repo.add_argument("--no-sync", action="store_true")
     configure_repo.add_argument("--json", action="store_true")
     configure_repo.set_defaults(func=cmd_configure_repo)
@@ -151,11 +160,28 @@ def build_parser() -> argparse.ArgumentParser:
     configure_group.add_argument("--repo-id")
     configure_group.add_argument("--enable-skill", action="append")
     configure_group.add_argument("--disable-skill", action="append")
+    configure_group.add_argument("--enable-policy", action="append")
+    configure_group.add_argument("--disable-policy", action="append")
     configure_group.add_argument("--enable-source", action="append")
     configure_group.add_argument("--disable-source", action="append")
+    configure_group.add_argument("--enable-doc", action="append")
+    configure_group.add_argument("--disable-doc", action="append")
+    configure_group.add_argument("--recommended-agent-type", action="append")
     configure_group.add_argument("--no-sync", action="store_true")
     configure_group.add_argument("--json", action="store_true")
     configure_group.set_defaults(func=cmd_configure_group)
+
+    configure_org = subparsers.add_parser("configure-org")
+    configure_org.add_argument("--enable-skill", action="append")
+    configure_org.add_argument("--disable-skill", action="append")
+    configure_org.add_argument("--minimal-enable-skill", action="append")
+    configure_org.add_argument("--minimal-disable-skill", action="append")
+    configure_org.add_argument("--enable-source", action="append")
+    configure_org.add_argument("--disable-source", action="append")
+    configure_org.add_argument("--recommended-agent-type", action="append")
+    configure_org.add_argument("--no-sync", action="store_true")
+    configure_org.add_argument("--json", action="store_true")
+    configure_org.set_defaults(func=cmd_configure_org)
 
     bind_workspace = subparsers.add_parser("bind-workspace")
     bind_workspace.add_argument("--path", type=Path, default=Path.cwd())
@@ -201,6 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     refresh = subparsers.add_parser("refresh-personal-skills")
     refresh.add_argument("--source", type=Path, default=Path.home() / ".agents" / "skills")
     refresh.add_argument("--include-system", action="store_true")
+    refresh.add_argument("--enable-imported", action="store_true")
     refresh.add_argument("--json", action="store_true")
     refresh.set_defaults(func=cmd_refresh_personal_skills)
 
@@ -349,9 +376,9 @@ def cmd_attach(args: argparse.Namespace) -> int:
     workspace = args.workspace.expanduser().resolve()
     result = resolve_workspace(workspace, machine_config, corp, user)
     if result.workspace_context.is_unknown:
-        if args.json:
-            raise TeamAgentsError("Unresolved attach flow is interactive only; run without --json")
-        return cmd_attach_unresolved(machine_config, corp, workspace, result.workspace_context)
+        if args.json and args.mode is None:
+            raise TeamAgentsError("Unresolved attach in --json mode requires --mode")
+        return cmd_attach_unresolved(machine_config, corp, workspace, result.workspace_context, args=args)
 
     summary = reseed(machine_config, corp, user, workspaces=[workspace], include_recent_workspaces=False)
     synced_workspace = next((item for item in summary["workspaces"] if item["workspace"] == str(workspace)), None)
@@ -386,9 +413,11 @@ def cmd_attach_unresolved(
     corp: CorpRepo,
     workspace: Path,
     context,
+    *,
+    args: argparse.Namespace | None = None,
 ) -> int:
     attach_path = context.git_root or workspace
-    action = prompt_attach_action()
+    action = args.mode if args and args.mode else prompt_attach_action()
     if action == "baseline":
         sync_args = argparse.Namespace(workspace=workspace, dry_run=False)
         return cmd_sync(sync_args)
@@ -410,27 +439,27 @@ def cmd_attach_unresolved(
         bind_args = build_bind_args_for_attach(corp=corp, path=attach_path)
         return cmd_bind_workspace(bind_args)
     if action == "repo":
-        repo_id = prompt_candidate_id(
+        repo_id = args.repo_id if args and args.repo_id else prompt_candidate_id(
             "repo",
             ranked_repo_ids(corp, workspace=workspace, normalized_remotes=context.normalized_remotes),
         )
         bind_args = argparse.Namespace(
             path=attach_path,
-            name=attach_path.name,
+            name=(args.binding_name if args and args.binding_name else attach_path.name),
             repo_id=repo_id,
             repo_group_id=None,
             no_sync=False,
-            json=False,
+            json=bool(args and args.json),
         )
         return cmd_bind_workspace(bind_args)
-    repo_group_id = prompt_candidate_id("repo-group", sorted(corp.repo_groups))
+    repo_group_id = args.repo_group_id if args and args.repo_group_id else prompt_candidate_id("repo-group", sorted(corp.repo_groups))
     bind_args = argparse.Namespace(
         path=attach_path,
-        name=attach_path.name,
+        name=(args.binding_name if args and args.binding_name else attach_path.name),
         repo_id=None,
         repo_group_id=repo_group_id,
         no_sync=False,
-        json=False,
+        json=bool(args and args.json),
     )
     return cmd_bind_workspace(bind_args)
 
@@ -617,8 +646,12 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     mode: str
     base_enabled_skills: list[str] = []
     base_disabled_skills: list[str] = []
+    base_optional_policies: list[str] = []
+    base_disabled_optional_policies: list[str] = []
     base_enabled_sources: list[str] = []
     base_disabled_sources: list[str] = []
+    base_docs: list[str] = []
+    base_recommended_agent_types: list[str] = []
 
     if context.matched_repo_id:
         matched_repo_id = context.matched_repo_id
@@ -633,8 +666,12 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         repo_group_id = args.repo_group_id if args.repo_group_id is not None else existing.repo_group_id
         base_enabled_skills = list(existing.enabled_skills)
         base_disabled_skills = list(existing.disabled_skills)
+        base_optional_policies = list(existing.optional_policies)
+        base_disabled_optional_policies = list(existing.disabled_optional_policies)
         base_enabled_sources = list(existing.enabled_sources)
         base_disabled_sources = list(existing.disabled_sources)
+        base_docs = list(existing.docs)
+        base_recommended_agent_types = list(existing.recommended_agent_types)
         mode = "updated"
     elif args.repo_id and args.repo_id in corp.repos:
         existing = corp.repos[args.repo_id].config
@@ -643,8 +680,12 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         repo_group_id = args.repo_group_id if args.repo_group_id is not None else existing.repo_group_id
         base_enabled_skills = list(existing.enabled_skills)
         base_disabled_skills = list(existing.disabled_skills)
+        base_optional_policies = list(existing.optional_policies)
+        base_disabled_optional_policies = list(existing.disabled_optional_policies)
         base_enabled_sources = list(existing.enabled_sources)
         base_disabled_sources = list(existing.disabled_sources)
+        base_docs = list(existing.docs)
+        base_recommended_agent_types = list(existing.recommended_agent_types)
         mode = "updated"
     else:
         repo_id = args.repo_id or derive_repo_id(context.normalized_remotes, workspace)
@@ -656,8 +697,16 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     validate_repo_group_id(repo_group_id, corp)
     enabled_skills = merge_delta_values(base_enabled_skills, args.enable_skill, args.disable_skill)
     disabled_skills = merge_delta_values(base_disabled_skills, args.disable_skill, args.enable_skill)
+    optional_policies = merge_delta_values(base_optional_policies, args.enable_policy, args.disable_policy)
+    disabled_optional_policies = merge_delta_values(
+        base_disabled_optional_policies, args.disable_policy, args.enable_policy
+    )
     enabled_sources = merge_delta_values(base_enabled_sources, args.enable_source, args.disable_source)
     disabled_sources = merge_delta_values(base_disabled_sources, args.disable_source, args.enable_source)
+    docs = merge_delta_values(base_docs, args.enable_doc, args.disable_doc)
+    recommended_agent_types = (
+        unique_list(args.recommended_agent_type) if args.recommended_agent_type is not None else list(base_recommended_agent_types)
+    )
     enabled_skills, disabled_skills = resolve_repo_collisions(
         args=args,
         workspace=workspace,
@@ -683,13 +732,17 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
             repo_class=repo_class,
             repo_group_id=repo_group_id,
             enabled_skills=enabled_skills or None,
+            optional_policies=optional_policies or None,
+            docs=docs or None,
+            recommended_agent_types=recommended_agent_types or None,
         )
-        if enabled_sources or disabled_sources or disabled_skills:
+        if enabled_sources or disabled_sources or disabled_skills or disabled_optional_policies:
             config_path = update_repo_config(
                 config_path,
                 enabled_sources=enabled_sources or [],
                 disabled_sources=disabled_sources or [],
                 disabled_skills=disabled_skills or [],
+                disabled_optional_policies=disabled_optional_policies or [],
             )
     else:
         config_path = update_repo_config(
@@ -699,8 +752,12 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
             repo_group_id=repo_group_id,
             enabled_skills=enabled_skills,
             disabled_skills=disabled_skills,
+            optional_policies=optional_policies,
+            disabled_optional_policies=disabled_optional_policies,
             enabled_sources=enabled_sources,
             disabled_sources=disabled_sources,
+            docs=docs,
+            recommended_agent_types=recommended_agent_types,
         )
 
     synced = False
@@ -718,13 +775,20 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     repo_layer = corp.repos[repo_id].config
     effective = {
         "enabled_skills": resolution.enabled_skills,
+        "optional_policies": resolution.active_policies,
         "enabled_sources": resolution.enabled_sources,
+        "docs": resolution.active_docs,
+        "recommended_agent_types": resolution.recommended_agent_types,
     }
     local_deltas = {
         "enabled_skills": list(repo_layer.enabled_skills),
         "disabled_skills": list(repo_layer.disabled_skills),
+        "optional_policies": list(repo_layer.optional_policies),
+        "disabled_optional_policies": list(repo_layer.disabled_optional_policies),
         "enabled_sources": list(repo_layer.enabled_sources),
         "disabled_sources": list(repo_layer.disabled_sources),
+        "docs": list(repo_layer.docs),
+        "recommended_agent_types": list(repo_layer.recommended_agent_types),
     }
 
     payload = {
@@ -761,20 +825,36 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
     group_id, mode = resolve_group_target(args=args, repo_config=repo_config, corp=corp, workspace=workspace)
     base_enabled_skills: list[str] = []
     base_disabled_skills: list[str] = []
+    base_optional_policies: list[str] = []
+    base_disabled_optional_policies: list[str] = []
     base_enabled_sources: list[str] = []
     base_disabled_sources: list[str] = []
+    base_docs: list[str] = []
+    base_recommended_agent_types: list[str] = []
 
     if mode == "updated":
         existing = corp.repo_groups[group_id].config
         base_enabled_skills = list(existing.enabled_skills)
         base_disabled_skills = list(existing.disabled_skills)
+        base_optional_policies = list(existing.optional_policies)
+        base_disabled_optional_policies = list(existing.disabled_optional_policies)
         base_enabled_sources = list(existing.enabled_sources)
         base_disabled_sources = list(existing.disabled_sources)
+        base_docs = list(existing.docs)
+        base_recommended_agent_types = list(existing.recommended_agent_types)
 
     enabled_skills = merge_delta_values(base_enabled_skills, args.enable_skill, args.disable_skill)
     disabled_skills = merge_delta_values(base_disabled_skills, args.disable_skill, args.enable_skill)
+    optional_policies = merge_delta_values(base_optional_policies, args.enable_policy, args.disable_policy)
+    disabled_optional_policies = merge_delta_values(
+        base_disabled_optional_policies, args.disable_policy, args.enable_policy
+    )
     enabled_sources = merge_delta_values(base_enabled_sources, args.enable_source, args.disable_source)
     disabled_sources = merge_delta_values(base_disabled_sources, args.disable_source, args.enable_source)
+    docs = merge_delta_values(base_docs, args.enable_doc, args.disable_doc)
+    recommended_agent_types = (
+        unique_list(args.recommended_agent_type) if args.recommended_agent_type is not None else list(base_recommended_agent_types)
+    )
     enabled_skills, disabled_skills = resolve_group_collisions(
         args=args,
         workspace=workspace,
@@ -798,6 +878,10 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
             disabled_skills=disabled_skills or None,
             enabled_sources=enabled_sources or None,
             disabled_sources=disabled_sources or None,
+            optional_policies=optional_policies or None,
+            disabled_optional_policies=disabled_optional_policies or None,
+            docs=docs or None,
+            recommended_agent_types=recommended_agent_types or None,
         )
     else:
         config_path = update_repo_group_config(
@@ -806,6 +890,10 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
             disabled_skills=disabled_skills,
             enabled_sources=enabled_sources,
             disabled_sources=disabled_sources,
+            optional_policies=optional_policies,
+            disabled_optional_policies=disabled_optional_policies,
+            docs=docs,
+            recommended_agent_types=recommended_agent_types,
         )
 
     update_repo_config(
@@ -829,13 +917,20 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
     group_layer = corp.repo_groups[group_id].config
     effective = {
         "enabled_skills": resolution.enabled_skills,
+        "optional_policies": resolution.active_policies,
         "enabled_sources": resolution.enabled_sources,
+        "docs": resolution.active_docs,
+        "recommended_agent_types": resolution.recommended_agent_types,
     }
     local_deltas = {
         "enabled_skills": list(group_layer.enabled_skills),
         "disabled_skills": list(group_layer.disabled_skills),
+        "optional_policies": list(group_layer.optional_policies),
+        "disabled_optional_policies": list(group_layer.disabled_optional_policies),
         "enabled_sources": list(group_layer.enabled_sources),
         "disabled_sources": list(group_layer.disabled_sources),
+        "docs": list(group_layer.docs),
+        "recommended_agent_types": list(group_layer.recommended_agent_types),
     }
     payload = {
         "workspace": str(workspace),
@@ -847,6 +942,50 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
         "group_layer": local_deltas,
         "synced": synced,
         "written": written,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_configure_org(args: argparse.Namespace) -> int:
+    machine_config = load_machine_config()
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    org_config = corp.org.config
+    enabled_skills = merge_delta_values(list(org_config.enabled_skills), args.enable_skill, args.disable_skill)
+    minimal_enabled_skills = merge_delta_values(
+        list(org_config.minimal_enabled_skills), args.minimal_enable_skill, args.minimal_disable_skill
+    )
+    enabled_sources = merge_delta_values(list(org_config.enabled_sources), args.enable_source, args.disable_source)
+    recommended_agent_types = (
+        unique_list(args.recommended_agent_type) if args.recommended_agent_type is not None else list(org_config.recommended_agent_types)
+    )
+    config_path = org_config.layer_path / "config.toml"
+    data = read_toml(config_path)
+    data["enabled_skills"] = enabled_skills
+    data["minimal_enabled_skills"] = minimal_enabled_skills
+    data["enabled_sources"] = enabled_sources
+    data["recommended_agent_types"] = recommended_agent_types
+    write_toml_document(config_path, data)
+
+    corp = load_corp_repo(machine_config.corp_repo_path)
+    user = load_user_overrides(machine_config.user_override_path)
+    synced = not args.no_sync
+    if synced:
+        reseed(machine_config, corp, user)
+    reloaded = corp.org.config
+    payload = {
+        "config_path": str(config_path),
+        "org_layer": {
+            "enabled_skills": list(reloaded.enabled_skills),
+            "minimal_enabled_skills": list(reloaded.minimal_enabled_skills),
+            "enabled_sources": list(reloaded.enabled_sources),
+            "recommended_agent_types": list(reloaded.recommended_agent_types),
+        },
+        "synced": synced,
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -1059,6 +1198,7 @@ def cmd_refresh_personal_skills(args: argparse.Namespace) -> int:
         namespace=namespace,
         include_system=args.include_system,
         replace_existing=True,
+        auto_enable_imported=args.enable_imported,
     )
     corp = load_corp_repo(corp_repo)
     user = load_user_overrides(user_override)

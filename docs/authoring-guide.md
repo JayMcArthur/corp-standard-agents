@@ -1,6 +1,6 @@
 # Authoring Guide
 
-This guide describes the minimum authoring rules for corp control repos and user override layers used by `team-agents`.
+This guide describes the minimum authoring rules for corp control repos and corp-resident user profiles used by `team-agents`.
 
 ## Quick Start
 
@@ -12,6 +12,11 @@ team-agents setup --corp-repo /path/to/corp-control --user alice
 ```
 
 Then edit the generated files to match your org, repos, sources, and privacy rules.
+
+Recommended first shaping pass:
+- `team-agents configure-org --corp-repo /path/to/corp-control`
+- `team-agents configure-repo --workspace /path/to/repo`
+- `team-agents configure-group --workspace /path/to/repo`
 
 ## Folder Shape
 
@@ -76,7 +81,7 @@ Allowed values:
 - `slug`: lowercase ASCII, digits, `_`, `-`
 
 Examples:
-- `corp.shadowknight.skill.shell-global`
+- `corp.example-org.skill.recursive-planning`
 - `external.shared.policy.ext-policy`
 - `user.local.skill.personal-shell`
 
@@ -116,7 +121,7 @@ Rules:
 
 ## Workspace Bindings
 
-User override `config.toml` may include:
+User profile `config.toml` may include:
 
 ```toml
 [[workspace_binding]]
@@ -176,7 +181,7 @@ Example:
 
 ```toml
 policy_rules = [
-  { rule = "required_skill_ids", severity = "fail", skill_ids = ["corp.shadowknight.skill.shell-global"], remediation = "Enable the shell-global skill in org/config.toml" },
+  { rule = "required_skill_ids", severity = "fail", skill_ids = ["corp.example-org.skill.recursive-planning"], remediation = "Enable recursive-planning in org/config.toml" },
   { rule = "user_overrides_must_be_git_backed", severity = "warn" }
 ]
 ```

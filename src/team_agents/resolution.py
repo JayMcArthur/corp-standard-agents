@@ -182,6 +182,73 @@ def resolve_workspace(
     )
 
 
+def resolve_user_global(
+    machine_config: MachineConfig,
+    corp: CorpRepo,
+    user: UserOverrides,
+) -> ResolutionResult:
+    if any(
+        override.item_id in corp.org.config.baseline_policies and override.enabled is False
+        for override in user.layer.config.item_overrides
+    ):
+        raise ResolutionError("User overrides may not disable baseline policies")
+    context = WorkspaceContext(
+        workspace=machine_config.user_override_path,
+        git_root=None,
+        normalized_remotes=[],
+        repo_class="internal",
+        is_unknown=False,
+    )
+    layers = [corp.org, user.layer]
+    enabled_sources = merge_sources(layers)
+    resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
+    enabled_skills, skill_activations = merge_set_fields(layers, "enabled_skills", "disabled_skills")
+    optional_policies, policy_activations = merge_set_fields(layers, "optional_policies", "disabled_optional_policies")
+    docs, doc_activations = merge_set_fields(layers, "docs", "disabled_docs")
+    baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
+    baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
+    active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
+    recommended_agent_types = merge_recommended_agent_types(layers, unknown_only=False)
+    active_ids = set(enabled_skills) | set(active_policy_ids) | set(docs)
+    activation_map: dict[str, list[str]] = {}
+    for mapping in [skill_activations, policy_activations, doc_activations, baseline_policy_activations]:
+        for item_id, refs in mapping.items():
+            activation_map.setdefault(item_id, [])
+            for ref in refs:
+                if ref not in activation_map[item_id]:
+                    activation_map[item_id].append(ref)
+    active_items: dict[str, ResolvedItem] = {}
+    denied_items: dict[str, ResolvedItem] = {}
+    for item_id in active_ids:
+        resolved = resolved_items.get(item_id)
+        if resolved is None:
+            raise ResolutionError(f"Missing referenced item: {item_id}")
+        apply_enabled_override(resolved, layers)
+        if not resolved.active:
+            resolved.activated_by = activation_map.get(item_id, [])
+            denied_items[item_id] = resolved
+            continue
+        resolved.activated_by = activation_map.get(item_id, [])
+        active_items[item_id] = resolved
+    return ResolutionResult(
+        workspace_context=context,
+        layer_chain=["org", "user"],
+        applied_layers=[
+            {"layer_name": layer.config.layer_name, "identifier": layer.config.identifier}
+            for layer in layers
+        ],
+        enabled_sources=enabled_sources,
+        source_details=source_details,
+        enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
+        active_policies=sorted(item_id for item_id in active_policy_ids if item_id in active_items),
+        active_docs=sorted(item_id for item_id in docs if item_id in active_items),
+        recommended_agent_types=recommended_agent_types,
+        items=active_items,
+        denied_items=denied_items,
+        warnings=[],
+    )
+
+
 def select_layers(context: WorkspaceContext, corp: CorpRepo, user: UserOverrides) -> list[LayerData]:
     layers = [corp.org]
     if context.matched_repo_group_id:
