@@ -430,8 +430,13 @@ def cmd_attach_unresolved(
                 repo_group_id=None,
                 enable_skill=None,
                 disable_skill=None,
+                enable_policy=None,
+                disable_policy=None,
                 enable_source=None,
                 disable_source=None,
+                enable_doc=None,
+                disable_doc=None,
+                recommended_agent_type=None,
                 no_sync=False,
                 json=False,
             )
