@@ -1,0 +1,9 @@
+---
+description: "First paragraph for every tool."
+globs: ["src/**/*.py"]
+alwaysApply: true
+---
+
+First paragraph for every tool.
+
+Second paragraph should remain in Claude output.

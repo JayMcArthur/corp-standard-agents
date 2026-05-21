@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://team-agents.local/schemas/v1/profile-job.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "maintainer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "deprecated", "archived"]
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["unreviewed", "reviewed", "approved"]
+    },
+    "autonomy_level": {
+      "type": "string",
+      "enum": ["interactive", "supervised", "background", "autonomous"]
+    },
+    "requires_human_approval": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stop_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "escalation_contact": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_tool_classes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "requires_approval_for": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "forbidden_tool_classes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "intended_consumers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["human", "cursor", "claude", "codex", "harness", "agent-os", "workflow-engine", "ci-governance"]
+      }
+    },
+    "skills": {
+      "$ref": "activation.schema.json"
+    },
+    "policies": {
+      "$ref": "activation.schema.json"
+    },
+    "docs": {
+      "$ref": "activation.schema.json"
+    },
+    "contracts": {
+      "$ref": "activation.schema.json"
+    },
+    "packs": {
+      "$ref": "activation.schema.json"
+    },
+    "flows": {
+      "$ref": "activation.schema.json"
+    },
+    "profiles": {
+      "$ref": "activation.schema.json"
+    },
+    "recommended_agent_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

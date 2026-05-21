@@ -1,4 +1,4 @@
 id = "client-tracked"
-normalized_remotes = ["git.example.test/demo/client-tracked"]
+normalized_remotes = ["__CLIENT_TRACKED_REMOTE__"]
 repo_class = "client"
 enabled_skills = ["corp.shadowknight.skill.recursive-planning"]

@@ -13,10 +13,11 @@ from unittest.mock import patch
 
 from team_agents.cli import build_parser, main
 from team_agents.errors import ProtectionError, ResolutionError, ValidationError
-from team_agents.loaders import load_corp_repo, load_user_overrides
+from team_agents.loaders import load_corp_repo, load_user_layer
 from team_agents.machine import load_machine_config
 from team_agents.models import MachineConfig
 from team_agents.output import write_sync_output
+from team_agents.resolution_schema import validate_resolution_json
 from team_agents.resolution import resolve_workspace
 
 
@@ -368,8 +369,8 @@ def create_corp_repo(
     return corp
 
 
-def create_user_overrides(root: Path, workspace_binding_path: Path | None = None) -> Path:
-    user = root / "user-overrides"
+def create_user_layer(root: Path, workspace_binding_path: Path | None = None) -> Path:
+    user = root / "user-layer"
     binding_section = ""
     if workspace_binding_path is not None:
         binding_section = f"""
@@ -440,7 +441,7 @@ class TeamAgentsTests(unittest.TestCase):
             self.client_private_remote,
             self.client_tracked_remote,
         )
-        self.user_overrides = create_user_overrides(self.root, workspace_binding_path=self.bound_workspace)
+        self.user_layer = create_user_layer(self.root, workspace_binding_path=self.bound_workspace)
         self.internal_repo = self.root / "workspace-internal"
         self.client_private_repo = self.root / "workspace-client-private"
         self.client_tracked_repo = self.root / "workspace-client-tracked"
@@ -463,8 +464,8 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(self.corp_repo),
-                "--user-overrides",
-                str(self.user_overrides),
+                "--user-path",
+                str(self.user_layer),
                 "--cache-root",
                 str(self.cache_root),
             ]
@@ -482,7 +483,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_setup_writes_machine_config(self) -> None:
         config = self.configure_machine()
         self.assertEqual(config.corp_repo_path, self.corp_repo.resolve())
-        self.assertEqual(config.user_override_path, self.user_overrides.resolve())
+        self.assertEqual(config.user_layer_path, self.user_layer.resolve())
         self.assertTrue((self.home / ".team-agents" / "config.toml").exists())
 
     def test_setup_leaves_unregistered_workspace_unmaterialized(self) -> None:
@@ -499,9 +500,335 @@ class TeamAgentsTests(unittest.TestCase):
             exit_code = main(["context", "--workspace", str(self.unknown_repo), "--pretty"])
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
+        validate_resolution_json(payload)
         self.assertEqual(payload["matched_repo_id"], None)
+        self.assertNotIn("consumer_safety_warnings", payload)
         self.assertIn("corp.shadowknight.skill.shell-global", payload["enabled_skills"])
         self.assertIn("user.local.skill.personal-shell", payload["enabled_skills"])
+        shell = payload["items"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(shell["kind"], "skill")
+        self.assertEqual(shell["title"], "Shell Global")
+        self.assertEqual(shell["source_type"], "corp")
+        self.assertIn("source_path", shell)
+        self.assertEqual(shell["activation_state"], "enabled")
+        self.assertFalse(shell["required"])
+        self.assertEqual(shell["selected_by_packs"], [])
+        self.assertEqual(shell["selected_by_profiles"], [])
+        self.assertEqual(shell["target_outputs"], ["claude", "codex", "cursor"])
+        self.assertEqual(shell["privacy_status"], "repo-safe")
+
+    def test_context_for_harness_outputs_structured_constraints_without_orchestration(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "runner.toml",
+            """
+            id = "runner"
+            autonomy_level = "background"
+            requires_human_approval = ["deploy"]
+            stop_conditions = ["secrets_detected"]
+            allowed_tool_classes = ["read", "edit", "test"]
+            requires_approval_for = ["network"]
+            forbidden_tool_classes = ["payment"]
+
+            [activation]
+            required = ["corp.shadowknight.contract.definition-of-done"]
+            enabled = ["corp.shadowknight.flow.prep-before-code"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.definition-of-done"
+            kind = "contract"
+            title = "Definition Of Done"
+            privacy = "repo-safe"
+            evidence_required = ["tests_run", "risk_notes"]
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Show evidence before done.")
+        write(
+            self.corp_repo / "org" / "flows" / "prep-before-code" / "item.toml",
+            """
+            id = "corp.shadowknight.flow.prep-before-code"
+            kind = "flow"
+            title = "Prep Before Code"
+            privacy = "repo-safe"
+            inputs = ["task_request", "repo_context"]
+            outputs = ["implementation_plan", "verification_plan"]
+            evidence_required = ["verification_plan"]
+            stop_conditions = ["ambiguous_requirement"]
+            """,
+        )
+        write(self.corp_repo / "org" / "flows" / "prep-before-code" / "body.md", "Plan before implementation.")
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            allowed_profiles = ["runner"]
+            default_profile = "runner"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-harness", "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["kind"], "harness-context")
+        self.assertIn("no task runner", payload["non_goals"])
+        self.assertEqual(payload["workspace"]["profile"], "runner")
+        self.assertIn("corp.shadowknight.contract.definition-of-done", payload["required_contracts"])
+        self.assertIn("corp.shadowknight.contract.definition-of-done", payload["evidence_requirements"])
+        self.assertIn("corp.shadowknight.flow.prep-before-code", payload["active_flows"])
+        profile_permissions = payload["tool_permissions"]["profiles"][0]
+        self.assertEqual(profile_permissions["autonomy_level"], "background")
+        self.assertEqual(profile_permissions["allowed_tool_classes"], ["read", "edit", "test"])
+        self.assertEqual(profile_permissions["requires_approval_for"], ["network"])
+        self.assertEqual(profile_permissions["forbidden_tool_classes"], ["payment"])
+        self.assertIn("secrets_detected", payload["stop_conditions"])
+
+    def test_context_for_agent_os_outputs_boundary_without_runtime_state(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "planner.toml",
+            """
+            id = "planner"
+            autonomy_level = "interactive"
+            stop_conditions = ["unclear_task"]
+
+            [activation]
+            required = ["corp.shadowknight.contract.agent-os-done"]
+            enabled = ["corp.shadowknight.flow.agent-os-prep"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "agent-os-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.agent-os-done"
+            kind = "contract"
+            title = "Agent OS Done"
+            privacy = "repo-safe"
+            evidence_required = ["handoff_summary", "tests_run"]
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "agent-os-done" / "body.md", "Record task evidence.")
+        write(
+            self.corp_repo / "org" / "flows" / "agent-os-prep" / "item.toml",
+            """
+            id = "corp.shadowknight.flow.agent-os-prep"
+            kind = "flow"
+            title = "Agent OS Prep"
+            privacy = "repo-safe"
+            inputs = ["task_state", "memory_summary"]
+            outputs = ["selected_context", "handoff_requirements"]
+            evidence_required = ["selected_context"]
+            """,
+        )
+        write(self.corp_repo / "org" / "flows" / "agent-os-prep" / "body.md", "Prepare context only.")
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            allowed_profiles = ["planner"]
+            default_profile = "planner"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-agent-os", "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["kind"], "agent-os-context")
+        self.assertIn("standards registry", payload["runtime_boundary"]["team_agents_provides"])
+        self.assertIn("task state", payload["runtime_boundary"]["agent_os_provides"])
+        self.assertIn("no task state", payload["runtime_boundary"]["non_goals"])
+        self.assertEqual(payload["workspace"]["profile"], "planner")
+        self.assertIn("corp.shadowknight.contract.agent-os-done", payload["contracts"])
+        self.assertEqual(
+            payload["contracts"]["corp.shadowknight.contract.agent-os-done"]["evidence_required"],
+            ["handoff_summary", "tests_run"],
+        )
+        self.assertIn("corp.shadowknight.flow.agent-os-prep", payload["flows_as_playbooks"])
+        self.assertEqual(
+            payload["flows_as_playbooks"]["corp.shadowknight.flow.agent-os-prep"]["inputs"],
+            ["task_state", "memory_summary"],
+        )
+        shell = payload["trust_review_metadata"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(shell["trust_level"], "corp-reviewed")
+        self.assertIn("corp.shadowknight.skill.shell-global", payload["generated_targets"]["codex"])
+
+    def test_context_rejects_multiple_consumer_views(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                ["context", "--workspace", str(self.internal_repo), "--for-harness", "--for-agent-os", "--json"]
+            )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("choose only one consumer view", stderr.getvalue())
+
+    def test_context_for_workflow_engine_exposes_flows_contracts_and_profile_selection(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "workflow-review.toml",
+            """
+            id = "workflow-review"
+            autonomy_level = "interactive"
+            stop_conditions = ["external_system_unavailable"]
+
+            [activation]
+            required = ["corp.shadowknight.contract.workflow-done"]
+            enabled = ["corp.shadowknight.flow.workflow-review"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "workflow-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.workflow-done"
+            kind = "contract"
+            title = "Workflow Done"
+            privacy = "repo-safe"
+            owner = "platform"
+            evidence_required = ["approval_record", "verification_result"]
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "workflow-done" / "body.md", "Workflow contract.")
+        write(
+            self.corp_repo / "org" / "flows" / "workflow-review" / "item.toml",
+            """
+            id = "corp.shadowknight.flow.workflow-review"
+            kind = "flow"
+            title = "Workflow Review"
+            privacy = "repo-safe"
+            owner = "workflow-team"
+            inputs = ["pull_request", "policy_context"]
+            outputs = ["review_decision", "evidence_package"]
+            evidence_required = ["review_decision"]
+            stop_conditions = ["missing_policy_context"]
+            requires_approval_for = ["merge"]
+            """,
+        )
+        write(self.corp_repo / "org" / "flows" / "workflow-review" / "body.md", "Review workflow.")
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            allowed_profiles = ["workflow-review"]
+            default_profile = "workflow-review"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "context",
+                    "--workspace",
+                    str(self.internal_repo),
+                    "--profile",
+                    "workflow-review",
+                    "--for-workflow-engine",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["kind"], "workflow-engine-context")
+        self.assertIn("no workflow execution", payload["runtime_boundary"]["non_goals"])
+        self.assertIn("workflow graph", payload["runtime_boundary"]["workflow_engine_provides"])
+        self.assertEqual(payload["workspace"]["profile"], "workflow-review")
+        contract = payload["active_contracts"]["corp.shadowknight.contract.workflow-done"]
+        self.assertEqual(contract["owner"], "platform")
+        self.assertEqual(contract["evidence_required"], ["approval_record", "verification_result"])
+        flow = payload["flows"]["corp.shadowknight.flow.workflow-review"]
+        self.assertEqual(flow["owner"], "workflow-team")
+        self.assertEqual(flow["inputs"], ["pull_request", "policy_context"])
+        self.assertEqual(flow["outputs"], ["review_decision", "evidence_package"])
+        self.assertIn("missing_policy_context", payload["stop_conditions"])
+        self.assertIn("external_system_unavailable", payload["stop_conditions"])
+        self.assertIn("corp.shadowknight.flow.workflow-review", payload["evidence_requirements"])
+
+    def test_validate_json_reports_governance_status_for_ci(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["validate", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["kind"], "governance-validation")
+        self.assertEqual(payload["schema_version"], "v1")
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["resolution"]["matched_repo_id"], "internal-app")
+        self.assertIn("doctor_summary", payload)
+        self.assertIn("warnings", payload)
+
+    def test_validate_strict_fails_on_governance_warnings(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["validate", "--workspace", str(self.internal_repo), "--json", "--strict"])
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "fail")
+        self.assertTrue(payload["strict_failure"])
+        self.assertGreater(len(payload["warnings"]), 0)
+
+    def test_validate_returns_nonzero_on_schema_violation(self) -> None:
+        self.configure_machine()
+        write(
+            self.corp_repo / "org" / "skills" / "bad-script" / "item.toml",
+            """
+            id = "corp.shadowknight.skill.bad-script"
+            kind = "skill"
+            title = "Bad Script"
+            privacy = "repo-safe"
+            allows_scripts = true
+            """,
+        )
+        write(self.corp_repo / "org" / "skills" / "bad-script" / "body.md", "Bad body.")
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["validate", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "fail")
+        self.assertIn("allows_scripts", payload["errors"][0]["detail"])
+
+    def test_audit_and_doctor_strict_fail_on_governance_warnings(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            audit_exit = main(["audit", "--workspace", str(self.internal_repo), "--json", "--strict"])
+        self.assertEqual(audit_exit, 1)
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            doctor_exit = main(["doctor", "--workspace", str(self.internal_repo), "--json", "--strict"])
+        self.assertEqual(doctor_exit, 1)
 
     def test_audit_command_reports_item_provenance(self) -> None:
         self.configure_machine()
@@ -515,17 +842,182 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("external.shared.skill.ext-review: skill replaced via repo", report)
         self.assertIn("corp.shadowknight.skill.internal-ops", report)
 
+    def test_audit_json_explains_activation_targets_recommendations_and_conflicts(self) -> None:
+        write(
+            self.user_layer / "config.toml",
+            """
+            id = "local"
+            enabled_skills = ["user.local.skill.personal-shell"]
+            recommended_skills = ["user.local.skill.suggested-helper"]
+            """,
+        )
+        write(
+            self.user_layer / "skills" / "suggested-helper" / "item.toml",
+            """
+            id = "user.local.skill.suggested-helper"
+            kind = "skill"
+            title = "Suggested Helper"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.user_layer / "skills" / "suggested-helper" / "body.md", "Suggested helper body")
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        shell = report["active_items"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(shell["activation_reason"], "enabled")
+        self.assertEqual(shell["activation_state"], "enabled")
+        self.assertFalse(shell["required"])
+        self.assertEqual(shell["activation_source"], "enabled")
+        self.assertEqual(shell["activated_by"], ["org:shadowknight"])
+        self.assertEqual(shell["selected_by_packs"], [])
+        self.assertEqual(shell["selected_by_profiles"], [])
+        self.assertIn("source_path", shell)
+        self.assertEqual(shell["target_outputs"], ["claude", "codex", "cursor"])
+        self.assertEqual(shell["privacy_status"], "repo-safe")
+        no_leaks = report["active_items"]["corp.shadowknight.policy.no-leaks"]
+        self.assertEqual(no_leaks["activation_reason"], "required")
+        self.assertTrue(no_leaks["required"])
+        ext_review = report["active_items"]["external.shared.skill.ext-review"]
+        self.assertEqual(ext_review["status"], "replaced")
+        self.assertIsNotNone(ext_review["replaced_from"])
+        ext_lint = report["active_items"]["external.shared.skill.ext-lint"]
+        self.assertEqual(ext_lint["source_type"], "external")
+        self.assertEqual(ext_lint["trust_level"], "unreviewed")
+        self.assertFalse(ext_lint["allows_scripts"])
+        self.assertIn("standards_registry", report)
+        self.assertIn("sprawl_warnings", report)
+        self.assertIn("user.local.skill.suggested-helper", report["inactive_recommended_items"])
+
+    def test_registry_json_lists_available_standards_with_filters(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["registry", "--kind", "skill", "--repo-id", "internal-app", "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["filters"]["kind"], "skill")
+        self.assertEqual(report["filters"]["repo_id"], "internal-app")
+        ids = {item["id"] for item in report["items"]}
+        self.assertIn("corp.shadowknight.skill.shell-global", ids)
+        self.assertIn("corp.shadowknight.skill.platform-shared", ids)
+        self.assertIn("corp.shadowknight.skill.internal-ops", ids)
+        self.assertIn("user.local.skill.personal-shell", ids)
+        shell = next(item for item in report["items"] if item["id"] == "corp.shadowknight.skill.shell-global")
+        self.assertEqual(shell["kind"], "skill")
+        self.assertEqual(shell["status"], "active")
+        self.assertEqual(shell["review_status"], "unreviewed")
+        self.assertEqual(shell["source_type"], "corp")
+        self.assertIn("trust_level", shell)
+
+    def test_registry_can_filter_profiles_and_status(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "maintainer.toml",
+            """
+            id = "maintainer"
+            owner = "platform-enablement"
+            status = "active"
+            review_status = "approved"
+            intended_consumers = ["human", "harness"]
+            context_quality_max_active_items = 12
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["registry", "--kind", "profile", "--profile", "maintainer", "--status", "active", "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["counts"]["total"], 1)
+        profile = report["items"][0]
+        self.assertEqual(profile["id"], "maintainer")
+        self.assertEqual(profile["kind"], "profile")
+        self.assertEqual(profile["review_status"], "approved")
+        self.assertEqual(profile["intended_consumers"], ["human", "harness"])
+        self.assertEqual(profile["context_quality_max_active_items"], 12)
+
+    def test_audit_sprawl_warnings_cover_duplicate_pack_activation_and_deprecated_active_items(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            enabled_packs = [
+              "corp.shadowknight.pack.review-a",
+              "corp.shadowknight.pack.review-b"
+            ]
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "skills" / "shell-global" / "item.toml",
+            """
+            id = "corp.shadowknight.skill.shell-global"
+            kind = "skill"
+            title = "Shell Global"
+            privacy = "repo-safe"
+            status = "deprecated"
+            owner = "platform-enablement"
+            maintainer = "platform-enablement"
+            """,
+        )
+        for slug in ["review-a", "review-b"]:
+            write(
+                self.corp_repo / "org" / "packs" / slug / "item.toml",
+                f"""
+                id = "corp.shadowknight.pack.{slug}"
+                kind = "pack"
+                title = "Review {slug[-1].upper()}"
+                privacy = "repo-safe"
+                owner = "platform-enablement"
+                maintainer = "platform-enablement"
+
+                [activation]
+                enabled = ["corp.shadowknight.skill.shell-global"]
+                """,
+            )
+            write(self.corp_repo / "org" / "packs" / slug / "body.md", f"Review pack {slug}")
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertIn(
+            "deprecated active item: corp.shadowknight.skill.shell-global",
+            report["sprawl_warnings"],
+        )
+        self.assertIn(
+            "multiple packs activate corp.shadowknight.skill.shell-global: corp.shadowknight.pack.review-a, corp.shadowknight.pack.review-b",
+            report["sprawl_warnings"],
+        )
+
     def test_sync_internal_repo_writes_outputs_and_updates_agents(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         written = write_sync_output(result)
         self.assertTrue(any(path.name == "resolution.json" for path in written))
+        self.assertTrue(any(path.name == "artifacts.json" for path in written))
         agents_md = (self.internal_repo / "AGENTS.md").read_text(encoding="utf-8")
         claude_md = (self.internal_repo / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("<!-- team-agents:start -->", agents_md)
-        self.assertIn("Use the local generated context under `.agents/`.", agents_md)
+        self.assertIn("# Project Agent Guidance", agents_md)
+        self.assertIn("Generated context lives under `.agents/`.", agents_md)
+        self.assertIn("## Required Contracts", agents_md)
+        self.assertIn("Active profile/job", agents_md)
         self.assertIn("Use the local generated context under `.agents/`.", claude_md)
         self.assertTrue((self.internal_repo / ".agents" / "skills" / "ext-review" / "SKILL.md").exists())
         self.assertTrue((self.internal_repo / ".agents" / "skills" / "internal-ops" / "SKILL.md").exists())
@@ -537,6 +1029,26 @@ class TeamAgentsTests(unittest.TestCase):
         ext_lint = resolution["items"]["external.shared.skill.ext-lint"]
         self.assertEqual(ext_lint["timeout_seconds"], 77)
         self.assertIn("repo", ext_lint["overridden_by"])
+        manifest = json.loads((self.internal_repo / ".agents" / "artifacts.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["schema_version"], "v1")
+        self.assertEqual(manifest["repo_class"], "internal")
+        manifest_paths = {entry["path"]: entry for entry in manifest["artifacts"]}
+        self.assertIn(".agents/index.md", manifest_paths)
+        self.assertIn(".agents/resolution.json", manifest_paths)
+        self.assertIn(".agents/artifacts.json", manifest_paths)
+        self.assertIn("AGENTS.md", manifest_paths)
+        self.assertIn("CLAUDE.md", manifest_paths)
+        self.assertIn(".cursor/rules/team-agents.mdc", manifest_paths)
+        self.assertEqual(manifest_paths["AGENTS.md"]["kind"], "tool-router")
+        self.assertEqual(manifest_paths["AGENTS.md"]["target"], "codex")
+        self.assertTrue(manifest_paths["AGENTS.md"]["safe_to_commit"])
+        self.assertFalse(manifest_paths["CLAUDE.md"]["safe_to_commit"])
+        self.assertFalse(manifest_paths[".cursor/rules/team-agents.mdc"]["safe_to_commit"])
+        self.assertFalse(manifest_paths[".agents/resolution.json"]["safe_to_commit"])
+        self.assertEqual(
+            manifest_paths[".agents/resolution.json"]["source_resolution_hash"],
+            manifest["source_resolution_hash"],
+        )
 
     def test_sync_installs_git_exclude_protection(self) -> None:
         self.configure_machine()
@@ -583,10 +1095,10 @@ class TeamAgentsTests(unittest.TestCase):
                 exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
         self.assertEqual(exit_code, 0)
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
         self.assertEqual(resolution.workspace_context.matched_repo_id, "internal-app")
-        config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
+        config = (machine.user_layer_path / "config.toml").read_text(encoding="utf-8")
         self.assertIn(f'path = "{self.unknown_repo.resolve()}"', config)
         self.assertIn('repo_id = "internal-app"', config)
 
@@ -599,7 +1111,7 @@ class TeamAgentsTests(unittest.TestCase):
                 exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
         self.assertEqual(exit_code, 0)
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
         self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
         self.assertIn("corp.shadowknight.skill.platform-shared", resolution.enabled_skills)
@@ -613,9 +1125,19 @@ class TeamAgentsTests(unittest.TestCase):
                 exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
         self.assertEqual(exit_code, 0)
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         resolution = resolve_workspace(self.unknown_repo, machine, corp, user)
         self.assertTrue(resolution.workspace_context.is_unknown)
+        self.assertTrue((self.unknown_repo / ".agents" / "resolution.json").exists())
+
+    def test_attach_unresolved_repo_defaults_to_baseline_on_eof(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("builtins.input", side_effect=EOFError):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["attach", "--workspace", str(self.unknown_repo)])
+        self.assertEqual(exit_code, 0)
         self.assertTrue((self.unknown_repo / ".agents" / "resolution.json").exists())
 
     def test_attach_unresolved_repo_can_configure_now(self) -> None:
@@ -633,7 +1155,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_sync_wraps_plain_skill_bodies_in_valid_frontmatter(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.unknown_repo, machine, corp, user)
         write_sync_output(result)
         shell_global = (self.unknown_repo / ".agents" / "skills" / "shell-global" / "SKILL.md").read_text(encoding="utf-8")
@@ -650,7 +1172,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_sync_client_repo_fails_on_corp_private_skill(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         with self.assertRaises(ResolutionError):
             resolve_workspace(self.client_private_repo, machine, corp, user)
 
@@ -662,7 +1184,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_unknown_git_repo_gets_minimal_baseline_and_user_skill(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.unknown_repo, machine, corp, user)
         self.assertIsNone(result.workspace_context.matched_repo_id)
         self.assertEqual(
@@ -674,7 +1196,7 @@ class TeamAgentsTests(unittest.TestCase):
     def test_non_git_workspace_binding_applies_repo_group_context(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.bound_workspace, machine, corp, user)
         self.assertEqual(result.workspace_context.matched_repo_group_id, "platform")
         self.assertIn("corp.shadowknight.skill.platform-shared", result.enabled_skills)
@@ -694,9 +1216,9 @@ class TeamAgentsTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             load_corp_repo(self.corp_repo)
 
-    def test_user_override_cannot_disable_baseline_policy(self) -> None:
+    def test_user_layer_cannot_disable_baseline_policy(self) -> None:
         write(
-            self.user_overrides / "config.toml",
+            self.user_layer / "config.toml",
             """
             id = "local"
             enabled_skills = ["user.local.skill.personal-shell"]
@@ -711,8 +1233,8 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(self.corp_repo),
-                "--user-overrides",
-                str(self.user_overrides),
+                "--user-path",
+                str(self.user_layer),
                 "--cache-root",
                 str(self.cache_root),
             ]
@@ -722,16 +1244,594 @@ class TeamAgentsTests(unittest.TestCase):
     def test_resolution_json_records_activation_provenance_across_layers(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         payload = resolve_workspace(self.internal_repo, machine, corp, user).to_dict()
         self.assertEqual(payload["items"]["corp.shadowknight.skill.shell-global"]["activated_by"], ["org:shadowknight"])
         self.assertEqual(payload["items"]["corp.shadowknight.skill.platform-shared"]["activated_by"], ["repo-group:platform"])
         self.assertEqual(payload["items"]["user.local.skill.personal-shell"]["activated_by"], ["user:local"])
         self.assertEqual(payload["items"]["corp.shadowknight.policy.no-leaks"]["activated_by"], ["org:shadowknight"])
 
+    def test_local_user_layer_resolves_contracts_flows_packs_and_profiles(self) -> None:
+        write(
+            self.user_layer / "config.toml",
+            """
+            id = "local"
+            enabled_skills = ["user.local.skill.personal-shell"]
+            optional_contracts = ["user.local.contract.personal-quality"]
+
+            [packs]
+            enabled = ["user.local.pack.personal-review"]
+
+            [flows]
+            enabled = ["user.local.flow.preflight"]
+
+            [profiles]
+            enabled = ["user.local.profile.shell"]
+            """,
+        )
+        for folder, kind, slug, title in [
+            ("contracts", "contract", "personal-quality", "Personal Quality"),
+            ("packs", "pack", "personal-review", "Personal Review"),
+            ("packs", "pack", "inactive-pack", "Inactive Pack"),
+            ("flows", "flow", "preflight", "Preflight"),
+            ("profiles", "profile", "shell", "Shell Profile"),
+        ]:
+            write(
+                self.user_layer / folder / slug / "item.toml",
+                f"""
+                id = "user.local.{kind}.{slug}"
+                kind = "{kind}"
+                title = "{title}"
+                privacy = "repo-safe"
+                """,
+            )
+            write(self.user_layer / folder / slug / "body.md", f"{title} body")
+        write(
+            self.user_layer / "flows" / "preflight" / "item.toml",
+            """
+            id = "user.local.flow.preflight"
+            kind = "flow"
+            title = "Preflight"
+            privacy = "repo-safe"
+            owner = "developer-experience"
+            inputs = ["issue", "repo_context"]
+            outputs = ["patch", "verification_report"]
+            evidence_required = ["tests_run", "risk_notes"]
+            stop_conditions = ["ambiguous_requirement", "security_boundary_unclear"]
+            """,
+        )
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("user.local.contract.personal-quality", result.active_contracts)
+        self.assertIn("user.local.pack.personal-review", result.active_packs)
+        self.assertIn("user.local.flow.preflight", result.active_flows)
+        self.assertIn("user.local.profile.shell", result.active_profiles)
+        self.assertNotIn("user.local.pack.inactive-pack", result.items)
+        payload = result.to_dict()
+        self.assertEqual(payload["items"]["user.local.contract.personal-quality"]["activated_by"], ["user:local"])
+        self.assertEqual(payload["items"]["user.local.pack.personal-review"]["kind"], "pack")
+        flow = payload["items"]["user.local.flow.preflight"]
+        self.assertEqual(flow["inputs"], ["issue", "repo_context"])
+        self.assertEqual(flow["outputs"], ["patch", "verification_report"])
+        self.assertEqual(flow["evidence_required"], ["tests_run", "risk_notes"])
+        self.assertEqual(flow["stop_conditions"], ["ambiguous_requirement", "security_boundary_unclear"])
+
+        write_sync_output(result)
+        index = (self.internal_repo / ".agents" / "index.md").read_text(encoding="utf-8")
+        self.assertIn("- `user.local.flow.preflight`", index)
+        self.assertIn("Inputs: `issue`, `repo_context`", index)
+        self.assertIn("Outputs: `patch`, `verification_report`", index)
+        self.assertIn("Evidence required: `tests_run`, `risk_notes`", index)
+        self.assertIn("Stop conditions: `ambiguous_requirement`, `security_boundary_unclear`", index)
+
+    def test_pack_contents_activate_referenced_items_with_provenance(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'enabled_packs = ["corp.shadowknight.pack.review-baseline"]\n',
+            encoding="utf-8",
+        )
+        for folder, kind, slug, title in [
+            ("contracts", "contract", "pack-done", "Pack Done"),
+            ("docs", "doc", "pack-guide", "Pack Guide"),
+            ("skills", "skill", "pack-helper", "Pack Helper"),
+        ]:
+            write(
+                self.corp_repo / "org" / folder / slug / "item.toml",
+                f"""
+                id = "corp.shadowknight.{kind}.{slug}"
+                kind = "{kind}"
+                title = "{title}"
+                privacy = "repo-safe"
+                """,
+            )
+            write(self.corp_repo / "org" / folder / slug / "body.md", f"{title} body")
+        write(
+            self.corp_repo / "org" / "packs" / "review-baseline" / "item.toml",
+            """
+            id = "corp.shadowknight.pack.review-baseline"
+            kind = "pack"
+            title = "Review Baseline"
+            privacy = "repo-safe"
+
+            [activation]
+            required = ["corp.shadowknight.contract.pack-done"]
+            enabled = [
+              "corp.shadowknight.doc.pack-guide",
+              "corp.shadowknight.pack.review-tools"
+            ]
+            """,
+        )
+        write(self.corp_repo / "org" / "packs" / "review-baseline" / "body.md", "Review baseline")
+        write(
+            self.corp_repo / "org" / "packs" / "review-tools" / "item.toml",
+            """
+            id = "corp.shadowknight.pack.review-tools"
+            kind = "pack"
+            title = "Review Tools"
+            privacy = "repo-safe"
+
+            [activation]
+            enabled = ["corp.shadowknight.skill.pack-helper"]
+            """,
+        )
+        write(self.corp_repo / "org" / "packs" / "review-tools" / "body.md", "Review tools")
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("corp.shadowknight.pack.review-baseline", result.active_packs)
+        self.assertIn("corp.shadowknight.pack.review-tools", result.active_packs)
+        self.assertIn("corp.shadowknight.contract.pack-done", result.active_contracts)
+        self.assertIn("corp.shadowknight.doc.pack-guide", result.active_docs)
+        self.assertIn("corp.shadowknight.skill.pack-helper", result.enabled_skills)
+        self.assertEqual(result.items["corp.shadowknight.contract.pack-done"].activation_reason, "required")
+        self.assertEqual(result.items["corp.shadowknight.doc.pack-guide"].activation_reason, "enabled")
+        self.assertEqual(
+            result.items["corp.shadowknight.contract.pack-done"].activated_by,
+            ["org:shadowknight", "pack:corp.shadowknight.pack.review-baseline"],
+        )
+        self.assertEqual(
+            result.items["corp.shadowknight.skill.pack-helper"].activated_by,
+            [
+                "org:shadowknight",
+                "pack:corp.shadowknight.pack.review-baseline",
+                "pack:corp.shadowknight.pack.review-tools",
+            ],
+        )
+        payload = result.to_dict()
+        pack_helper = payload["items"]["corp.shadowknight.skill.pack-helper"]
+        self.assertEqual(
+            pack_helper["selected_by_packs"],
+            ["corp.shadowknight.pack.review-baseline", "corp.shadowknight.pack.review-tools"],
+        )
+        self.assertEqual(pack_helper["selected_by_profiles"], [])
+        self.assertEqual(pack_helper["activation_state"], "enabled")
+        self.assertEqual(pack_helper["target_outputs"], ["claude", "codex", "cursor"])
+
+    def test_repo_bootstrap_contract_activates_from_repo_and_renders_guidance(self) -> None:
+        repo_config = self.corp_repo / "repos" / "internal-app" / "config.toml"
+        repo_config.write_text(
+            repo_config.read_text(encoding="utf-8").replace(
+                "\n        [[item_override]]",
+                '\n        required_contracts = ["corp.shadowknight.contract.repo-bootstrap"]\n\n        [[item_override]]',
+            ),
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "repos" / "internal-app" / "contracts" / "repo-bootstrap" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.repo-bootstrap"
+            kind = "contract"
+            title = "Repo Bootstrap"
+            privacy = "repo-safe"
+            tags = ["bootstrap", "minimal-verification"]
+            """,
+        )
+        write(
+            self.corp_repo / "repos" / "internal-app" / "contracts" / "repo-bootstrap" / "body.md",
+            """
+            # Repo Bootstrap
+
+            Last verified: 2026-05-21
+
+            ## Commands
+
+            ```bash
+            python -m pip install -e .
+            PYTHONPATH=src python -m unittest discover -s tests -v
+            ```
+
+            ## Minimal verification
+
+            Run the unittest command above before handing off changes.
+            """,
+        )
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("corp.shadowknight.contract.repo-bootstrap", result.active_contracts)
+        self.assertEqual(result.items["corp.shadowknight.contract.repo-bootstrap"].activated_by, ["repo:internal-app"])
+
+        write_sync_output(result)
+        bootstrap = (self.internal_repo / ".agents" / "bootstrap.md").read_text(encoding="utf-8")
+        index = (self.internal_repo / ".agents" / "index.md").read_text(encoding="utf-8")
+        self.assertIn("Repo Bootstrap Guidance", index)
+        self.assertIn("python -m pip install -e .", bootstrap)
+        self.assertIn("PYTHONPATH=src python -m unittest discover -s tests -v", bootstrap)
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        bootstrap_check = next(check for check in report["checks"] if check["name"] == "bootstrap-guidance")
+        self.assertEqual(bootstrap_check["status"], "ok")
+
+    def test_bootstrap_contract_can_be_activated_by_profile(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "coder.toml",
+            """
+            id = "coder"
+            title = "Coder"
+
+            [activation]
+            required = ["corp.shadowknight.contract.repo-bootstrap"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "repo-bootstrap" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.repo-bootstrap"
+            kind = "contract"
+            title = "Repo Bootstrap"
+            privacy = "repo-safe"
+            tags = ["bootstrap"]
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "repo-bootstrap" / "body.md", "Minimal verification: run tests.")
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user, profile="coder")
+
+        self.assertIn("corp.shadowknight.contract.repo-bootstrap", result.active_contracts)
+        self.assertEqual(result.items["corp.shadowknight.contract.repo-bootstrap"].activated_by, ["profile:coder"])
+
+    def test_circular_pack_references_are_rejected(self) -> None:
+        write(
+            self.user_layer / "config.toml",
+            """
+            id = "local"
+
+            [packs]
+            enabled = ["user.local.pack.alpha"]
+            """,
+        )
+        for slug, next_slug in [("alpha", "beta"), ("beta", "alpha")]:
+            write(
+                self.user_layer / "packs" / slug / "item.toml",
+                f"""
+                id = "user.local.pack.{slug}"
+                kind = "pack"
+                title = "{slug.title()}"
+                privacy = "repo-safe"
+
+                [activation]
+                enabled = ["user.local.pack.{next_slug}"]
+                """,
+            )
+            write(self.user_layer / "packs" / slug / "body.md", f"{slug} body")
+
+        machine = MachineConfig(
+            corp_repo_path=self.corp_repo,
+            user_layer_path=self.user_layer,
+            cache_root=self.cache_root,
+            default_tool_target="all",
+        )
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        with self.assertRaisesRegex(ResolutionError, "Circular pack reference"):
+            resolve_workspace(self.internal_repo, machine, corp, user)
+
+    def test_activation_is_opt_in_with_required_and_recommended_distinct(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'required_packs = ["corp.shadowknight.pack.client-safe"]\n',
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "org" / "packs" / "client-safe" / "item.toml",
+            """
+            id = "corp.shadowknight.pack.client-safe"
+            kind = "pack"
+            title = "Client Safe"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp_repo / "org" / "packs" / "client-safe" / "body.md", "Client safe pack")
+        write(
+            self.user_layer / "config.toml",
+            """
+            id = "local"
+
+            [skills]
+            enabled = ["user.local.skill.personal-shell"]
+            recommended = ["user.local.skill.recommended-helper"]
+
+            [packs]
+            recommended = ["user.local.pack.recommended-pack"]
+            """,
+        )
+        for folder, kind, slug, title in [
+            ("skills", "skill", "recommended-helper", "Recommended Helper"),
+            ("skills", "skill", "inactive-helper", "Inactive Helper"),
+            ("packs", "pack", "recommended-pack", "Recommended Pack"),
+            ("packs", "pack", "inactive-pack", "Inactive Pack"),
+        ]:
+            write(
+                self.user_layer / folder / slug / "item.toml",
+                f"""
+                id = "user.local.{kind}.{slug}"
+                kind = "{kind}"
+                title = "{title}"
+                privacy = "repo-safe"
+                """,
+            )
+            write(self.user_layer / folder / slug / "body.md", f"{title} body")
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("corp.shadowknight.pack.client-safe", result.active_packs)
+        self.assertEqual(result.items["corp.shadowknight.pack.client-safe"].activation_reason, "required")
+        self.assertEqual(result.items["user.local.skill.personal-shell"].activation_reason, "enabled")
+        self.assertNotIn("user.local.skill.inactive-helper", result.items)
+        self.assertNotIn("user.local.pack.inactive-pack", result.items)
+        self.assertIn("user.local.skill.recommended-helper", result.recommended_items)
+        self.assertIn("user.local.pack.recommended-pack", result.recommended_items)
+        self.assertNotIn("user.local.skill.recommended-helper", result.items)
+        self.assertNotIn("user.local.pack.recommended-pack", result.items)
+
+    def test_generalized_activation_table_activates_items(self) -> None:
+        write(
+            self.user_layer / "config.toml",
+            """
+            id = "local"
+
+            [activation]
+            required = ["user.local.contract.personal-done"]
+            enabled = [
+              "user.local.skill.personal-shell",
+              "user.local.doc.personal-notes",
+              "user.local.flow.personal-flow"
+            ]
+            recommended = ["user.local.pack.suggested-pack"]
+            """,
+        )
+        for folder, kind, slug, title in [
+            ("contracts", "contract", "personal-done", "Personal Done"),
+            ("docs", "doc", "personal-notes", "Personal Notes"),
+            ("flows", "flow", "personal-flow", "Personal Flow"),
+            ("packs", "pack", "suggested-pack", "Suggested Pack"),
+        ]:
+            write(
+                self.user_layer / folder / slug / "item.toml",
+                f"""
+                id = "user.local.{kind}.{slug}"
+                kind = "{kind}"
+                title = "{title}"
+                privacy = "repo-safe"
+                """,
+            )
+            write(self.user_layer / folder / slug / "body.md", f"{title} body")
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("user.local.skill.personal-shell", result.enabled_skills)
+        self.assertIn("user.local.doc.personal-notes", result.active_docs)
+        self.assertIn("user.local.flow.personal-flow", result.active_flows)
+        self.assertIn("user.local.contract.personal-done", result.active_contracts)
+        self.assertEqual(result.items["user.local.contract.personal-done"].activation_reason, "required")
+        self.assertIn("user.local.pack.suggested-pack", result.recommended_items)
+        self.assertNotIn("user.local.pack.suggested-pack", result.items)
+
+    def test_generalized_activation_table_works_in_profiles(self) -> None:
+        write(
+            self.corp_repo / "org" / "profiles" / "reviewer.toml",
+            """
+            id = "reviewer"
+
+            [activation]
+            enabled = ["corp.shadowknight.skill.repo-onboarding"]
+            required = ["corp.shadowknight.contract.review-done"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.review-done"
+            kind = "contract"
+            title = "Review Done"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done")
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", result.enabled_skills)
+        self.assertIn("corp.shadowknight.contract.review-done", result.active_contracts)
+        self.assertEqual(result.items["corp.shadowknight.contract.review-done"].activated_by, ["profile:reviewer"])
+
+    def test_resolution_warns_about_compatibility_mismatches(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + """
+            languages = ["python"]
+            frameworks = ["django"]
+            framework_versions = { django = "3.2" }
+            repo_tags = ["web-api"]
+            """,
+            encoding="utf-8",
+        )
+        shell_item = self.corp_repo / "org" / "skills" / "shell-global" / "item.toml"
+        shell_item.write_text(
+            shell_item.read_text(encoding="utf-8")
+            + """
+            applies_to_languages = ["ruby"]
+            applies_to_frameworks = ["rails"]
+            compatible_versions = { django = ">=4.2,<6" }
+            repo_tags = ["cli"]
+            """,
+            encoding="utf-8",
+        )
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+
+        self.assertIn("corp.shadowknight.skill.shell-global", result.enabled_skills)
+        warnings = "\n".join(result.warnings)
+        self.assertIn("applies_to_languages", warnings)
+        self.assertIn("applies_to_frameworks", warnings)
+        self.assertIn("django version 3.2 does not satisfy >=4.2,<6", warnings)
+        self.assertIn("repo_tags", warnings)
+        payload = result.to_dict()
+        shell = payload["items"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(shell["applies_to_languages"], ["ruby"])
+        self.assertEqual(shell["compatible_versions"], {"django": ">=4.2,<6"})
+
+    def test_profiles_select_different_context_sets(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'allowed_profiles = ["coder", "reviewer"]\n'
+            + 'default_profile = "coder"\n',
+            encoding="utf-8",
+        )
+        for slug, title in [("coder-flow", "Coder Flow"), ("reviewer-flow", "Reviewer Flow")]:
+            write(
+                self.corp_repo / "org" / "flows" / slug / "item.toml",
+                f"""
+                id = "corp.shadowknight.flow.{slug}"
+                kind = "flow"
+                title = "{title}"
+                privacy = "repo-safe"
+                """,
+            )
+            write(self.corp_repo / "org" / "flows" / slug / "body.md", f"{title} body")
+        write(
+            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.review-done"
+            kind = "contract"
+            title = "Review Done"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done contract")
+        write(
+            self.corp_repo / "org" / "profiles" / "coder.toml",
+            """
+            id = "coder"
+            enabled_flows = ["corp.shadowknight.flow.coder-flow"]
+            docs = ["corp.shadowknight.doc.platform-map"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "profiles" / "reviewer.toml",
+            """
+            id = "reviewer"
+            enabled_flows = ["corp.shadowknight.flow.reviewer-flow"]
+            required_contracts = ["corp.shadowknight.contract.review-done"]
+            enabled_skills = ["corp.shadowknight.skill.repo-onboarding"]
+            """,
+        )
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        default_result = resolve_workspace(self.internal_repo, machine, corp, user)
+        reviewer_result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
+        self.assertEqual(default_result.workspace_context.profile, "coder")
+        self.assertIn("corp.shadowknight.flow.coder-flow", default_result.active_flows)
+        self.assertNotIn("corp.shadowknight.flow.reviewer-flow", default_result.items)
+        self.assertEqual(reviewer_result.workspace_context.profile, "reviewer")
+        self.assertIn("corp.shadowknight.flow.reviewer-flow", reviewer_result.active_flows)
+        self.assertIn("corp.shadowknight.contract.review-done", reviewer_result.active_contracts)
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", reviewer_result.enabled_skills)
+        self.assertEqual(reviewer_result.layer_chain, ["org", "repo-group", "repo", "profile", "user"])
+        self.assertEqual(
+            reviewer_result.items["corp.shadowknight.contract.review-done"].activated_by,
+            ["profile:reviewer"],
+        )
+        self.assertEqual(
+            reviewer_result.to_dict()["items"]["corp.shadowknight.contract.review-done"]["selected_by_profiles"],
+            ["reviewer"],
+        )
+
+    def test_user_profile_additions_do_not_shadow_corp_profile_requirements(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8") + 'allowed_profiles = ["reviewer"]\n',
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.review-done"
+            kind = "contract"
+            title = "Review Done"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done contract")
+        write(
+            self.corp_repo / "org" / "profiles" / "reviewer.toml",
+            """
+            id = "reviewer"
+
+            [activation]
+            required = ["corp.shadowknight.contract.review-done"]
+            """,
+        )
+        write(
+            self.user_layer / "profiles" / "reviewer.toml",
+            """
+            id = "reviewer"
+
+            [activation]
+            enabled = ["user.local.skill.personal-shell"]
+            """,
+        )
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
+        self.assertIn("corp.shadowknight.contract.review-done", result.active_contracts)
+        self.assertIn("user.local.skill.personal-shell", result.enabled_skills)
+        self.assertEqual(result.layer_chain, ["org", "repo-group", "repo", "profile", "profile", "user"])
+
     def test_user_layer_cannot_weaken_corp_private_item(self) -> None:
         write(
-            self.user_overrides / "skills" / "internal-ops-replacement" / "item.toml",
+            self.user_layer / "skills" / "internal-ops-replacement" / "item.toml",
             """
             id = "corp.shadowknight.skill.internal-ops"
             kind = "skill"
@@ -740,11 +1840,11 @@ class TeamAgentsTests(unittest.TestCase):
             """,
         )
         write(
-            self.user_overrides / "skills" / "internal-ops-replacement" / "body.md",
+            self.user_layer / "skills" / "internal-ops-replacement" / "body.md",
             "attempted weaker replacement",
         )
         write(
-            self.user_overrides / "config.toml",
+            self.user_layer / "config.toml",
             """
             id = "local"
             enabled_skills = [
@@ -759,8 +1859,8 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(self.corp_repo),
-                "--user-overrides",
-                str(self.user_overrides),
+                "--user-path",
+                str(self.user_layer),
                 "--cache-root",
                 str(self.cache_root),
             ]
@@ -773,14 +1873,14 @@ class TeamAgentsTests(unittest.TestCase):
         git(self.internal_repo, "commit", "-m", "track generated path")
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         with self.assertRaisesRegex(ProtectionError, "Tracked .agents content already exists"):
             write_sync_output(result)
 
     def test_user_personal_source_is_pinned_and_loaded(self) -> None:
         write(
-            self.user_overrides / "config.toml",
+            self.user_layer / "config.toml",
             """
             id = "local"
             enabled_sources = ["personal-remote-source"]
@@ -792,7 +1892,7 @@ class TeamAgentsTests(unittest.TestCase):
             """,
         )
         write(
-            self.user_overrides / "sources" / "personal-remote-source.toml",
+            self.user_layer / "sources" / "personal-remote-source.toml",
             f"""
             id = "personal-remote-source"
             url = "{self.personal_url}"
@@ -803,15 +1903,19 @@ class TeamAgentsTests(unittest.TestCase):
         )
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.unknown_repo, machine, corp, user)
         self.assertIn("personal-remote-source", result.enabled_sources)
         self.assertIn("user.remote.skill.personal-remote", result.enabled_skills)
         cached_checkout = machine.cache_root / "sources" / "personal-remote-source" / self.personal_commit / "checkout"
         self.assertTrue(cached_checkout.exists())
-        library_link = self.home / ".team-agents" / "library" / "external" / f"personal-remote-source@{self.personal_commit}"
-        self.assertTrue(library_link.is_symlink())
-        self.assertEqual(library_link.resolve(), cached_checkout.resolve())
+        library_checkout = self.home / ".team-agents" / "library" / "external" / f"personal-remote-source@{self.personal_commit}"
+        self.assertFalse(library_checkout.is_symlink())
+        self.assertTrue((library_checkout / "skills" / "personal-remote" / "body.md").exists())
+        self.assertEqual(
+            (library_checkout / "skills" / "personal-remote" / "body.md").read_text(encoding="utf-8"),
+            (cached_checkout / "skills" / "personal-remote" / "body.md").read_text(encoding="utf-8"),
+        )
         trust_store = json.loads((machine.cache_root / "trust" / "sources.json").read_text(encoding="utf-8"))
         self.assertEqual(trust_store["sources"]["personal-remote-source"]["trust_mode"], "trust-on-first-use")
 
@@ -819,7 +1923,7 @@ class TeamAgentsTests(unittest.TestCase):
         git(self.internal_repo, "remote", "add", "secondary", "https://git.example.test/demo/internal-alt.git")
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         with self.assertRaisesRegex(ResolutionError, "Multiple repo mappings matched remotes"):
             resolve_workspace(self.internal_repo, machine, corp, user)
 
@@ -851,6 +1955,316 @@ class TeamAgentsTests(unittest.TestCase):
         tracked_check = next(check for check in report["checks"] if check["name"] == "tracked-generated-content")
         self.assertEqual(tracked_check["status"], "fail")
 
+    def test_doctor_warns_when_bootstrap_guidance_is_missing(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        bootstrap_check = next(check for check in report["checks"] if check["name"] == "bootstrap-guidance")
+        self.assertEqual(bootstrap_check["status"], "warn")
+        self.assertIn("no active repo bootstrap", bootstrap_check["detail"])
+
+    def test_doctor_warns_about_unreviewed_active_external_skills(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        trust_check = next(check for check in report["checks"] if check["name"] == "unreviewed-external-skills")
+        self.assertEqual(trust_check["status"], "warn")
+        self.assertIn("external.shared.skill.ext-lint", trust_check["detail"])
+
+    def test_doctor_warns_when_git_workspace_remote_matches_no_configured_repo(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.unknown_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        match_check = next(check for check in report["checks"] if check["name"] == "workspace-repo-match")
+        self.assertEqual(match_check["status"], "warn")
+        self.assertIn("git.example.test/demo/unknown", match_check["detail"])
+        self.assertIn("closest configured repo", match_check["detail"])
+
+    def test_doctor_warns_about_deprecated_active_items(self) -> None:
+        write(
+            self.corp_repo / "org" / "skills" / "shell-global" / "item.toml",
+            """
+            id = "corp.shadowknight.skill.shell-global"
+            kind = "skill"
+            title = "Shell Global"
+            privacy = "repo-safe"
+            status = "deprecated"
+            deprecated_by = "corp.shadowknight.skill.platform-shared"
+            sunset_after = "2026-12-31"
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        deprecated_check = next(check for check in report["checks"] if check["name"] == "deprecated-active-items")
+        self.assertEqual(deprecated_check["status"], "warn")
+        self.assertIn("corp.shadowknight.skill.shell-global", deprecated_check["detail"])
+
+    def test_doctor_warns_when_background_profile_has_no_stop_conditions(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            default_profile = "runner"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "profiles" / "runner.toml",
+            """
+            id = "runner"
+            title = "Runner"
+            autonomy_level = "background"
+
+            [activation]
+            enabled = ["corp.shadowknight.skill.shell-global"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        autonomy_check = next(check for check in report["checks"] if check["name"] == "autonomy-stop-conditions")
+        self.assertEqual(autonomy_check["status"], "warn")
+        self.assertIn("runner", autonomy_check["detail"])
+
+    def test_high_risk_intended_consumers_warn_without_safety_metadata(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            default_profile = "runner"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "profiles" / "runner.toml",
+            """
+            id = "runner"
+            title = "Runner"
+            autonomy_level = "interactive"
+            intended_consumers = ["harness", "agent-os"]
+
+            [activation]
+            enabled = ["corp.shadowknight.skill.shell-global"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        codes = {warning["code"] for warning in report["consumer_safety_warnings"]}
+        self.assertIn("missing-consumer-stop-conditions", codes)
+        self.assertIn("missing-consumer-permission-notes", codes)
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-harness", "--json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["tool_permissions"]["profiles"][0]["intended_consumers"], ["harness", "agent-os"])
+        context_codes = {warning["code"] for warning in payload["consumer_safety_warnings"]}
+        self.assertEqual(codes, context_codes)
+
+    def test_doctor_warns_when_profile_active_item_threshold_is_exceeded(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'allowed_profiles = ["lean"]\n'
+            + 'default_profile = "lean"\n',
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "org" / "profiles" / "lean.toml",
+            """
+            id = "lean"
+            context_quality_max_active_items = 2
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        warning = next(item for item in report["context_quality_warnings"] if item["code"] == "too-many-active-items")
+        self.assertIn("exceeds threshold 2", warning["detail"])
+        self.assertIn("context_quality_max_active_items", warning["remediation"])
+        check = next(check for check in report["checks"] if check["name"] == "context-quality:too-many-active-items")
+        self.assertEqual(check["status"], "warn")
+
+    def test_doctor_warns_when_client_repo_lacks_client_data_boundary(self) -> None:
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.client_tracked_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        warning = next(
+            item for item in report["context_quality_warnings"] if item["code"] == "missing-client-data-boundary"
+        )
+        self.assertIn("client repo", warning["detail"])
+        self.assertIn("client data handling", warning["remediation"])
+
+    def test_audit_warns_when_high_autonomy_profile_lacks_permission_notes(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            default_profile = "runner"
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "profiles" / "runner.toml",
+            """
+            id = "runner"
+            title = "Runner"
+            autonomy_level = "autonomous"
+            stop_conditions = ["secrets_detected"]
+
+            [activation]
+            enabled = ["corp.shadowknight.skill.shell-global"]
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertIn(
+            "high-autonomy profile lacks tool permission notes: runner",
+            report["sprawl_warnings"],
+        )
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        doctor_report = json.loads(stdout.getvalue())
+        codes = {warning["code"] for warning in doctor_report["consumer_safety_warnings"]}
+        self.assertIn("missing-consumer-permission-notes", codes)
+
+    def test_review_status_and_deprecation_metadata_surface_in_context_and_audit(self) -> None:
+        write(
+            self.corp_repo / "org" / "skills" / "shell-global" / "item.toml",
+            """
+            id = "corp.shadowknight.skill.shell-global"
+            kind = "skill"
+            title = "Shell Global"
+            privacy = "repo-safe"
+            owner = "platform-enablement"
+            maintainer = "agent-standards"
+            status = "draft"
+            review_status = "reviewed"
+            deprecated_by = "corp.shadowknight.skill.platform-shared"
+            sunset_after = "2026-12-31"
+            """,
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["context", "--workspace", str(self.internal_repo), "--pretty"])
+        self.assertEqual(exit_code, 0)
+        context = json.loads(stdout.getvalue())
+        shell = context["items"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(shell["lifecycle_status"], "draft")
+        self.assertEqual(shell["review_status"], "reviewed")
+        self.assertEqual(shell["deprecated_by"], "corp.shadowknight.skill.platform-shared")
+        self.assertEqual(shell["sunset_after"], "2026-12-31")
+
+        audit_stdout = StringIO()
+        with redirect_stdout(audit_stdout), redirect_stderr(StringIO()):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        audit = json.loads(audit_stdout.getvalue())
+        audit_shell = audit["active_items"]["corp.shadowknight.skill.shell-global"]
+        self.assertEqual(audit_shell["review_status"], "reviewed")
+        self.assertEqual(audit_shell["owner"], "platform-enablement")
+
+    def test_source_trust_level_marks_external_skills_reviewed(self) -> None:
+        manifest = self.corp_repo / "org" / "sources" / "shared-ext.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + '\ntrust_level = "corp-reviewed"\nreviewed_by = "platform-enablement"\nreviewed_at = "2026-05-21"\n',
+            encoding="utf-8",
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        trust_check = next(check for check in report["checks"] if check["name"] == "unreviewed-external-skills")
+        self.assertEqual(trust_check["status"], "ok")
+        ext_lint = report["resolution"]["enabled_skills"]
+        self.assertIn("external.shared.skill.ext-lint", ext_lint)
+        machine = load_machine_config()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        payload = resolve_workspace(self.internal_repo, machine, corp, user).to_dict()
+        self.assertEqual(payload["items"]["external.shared.skill.ext-lint"]["trust_level"], "corp-reviewed")
+
+    def test_allows_scripts_true_is_rejected_for_v1_items(self) -> None:
+        write(
+            self.user_layer / "skills" / "scripted" / "item.toml",
+            """
+            id = "user.local.skill.scripted"
+            kind = "skill"
+            title = "Scripted"
+            privacy = "repo-safe"
+            allows_scripts = true
+            """,
+        )
+        write(self.user_layer / "skills" / "scripted" / "body.md", "Scripted body")
+        with self.assertRaisesRegex(ValidationError, "allows_scripts = true is not supported"):
+            load_user_layer(self.user_layer)
+
     def test_doctor_json_reports_policy_compliance(self) -> None:
         write(
             self.corp_repo / "org" / "config.toml",
@@ -875,7 +2289,7 @@ class TeamAgentsTests(unittest.TestCase):
             title = "Corp Compliance"
             privacy = "repo-safe"
             policy_rules = [
-              { rule = "user_overrides_must_be_git_backed", severity = "warn", remediation = "Put user overrides under git" },
+              { rule = "local_user_layer_must_be_git_backed", severity = "warn", remediation = "Put local user layer under git" },
               { rule = "required_skill_ids", severity = "fail", skill_ids = ["corp.shadowknight.skill.missing"], remediation = "Enable the missing corp skill" },
               { rule = "forbidden_source_patterns", severity = "warn", patterns = ["shared-ext"], remediation = "Disable the forbidden source" }
             ]
@@ -894,12 +2308,146 @@ class TeamAgentsTests(unittest.TestCase):
         report = json.loads(stdout.getvalue())
         self.assertIn("policy_compliance", report)
         entries = {entry["rule"]: entry for entry in report["policy_compliance"]}
-        self.assertEqual(entries["user_overrides_must_be_git_backed"]["severity"], "warn")
-        self.assertFalse(entries["user_overrides_must_be_git_backed"]["compliant"])
+        self.assertEqual(entries["local_user_layer_must_be_git_backed"]["severity"], "warn")
+        self.assertFalse(entries["local_user_layer_must_be_git_backed"]["compliant"])
         self.assertFalse(entries["required_skill_ids"]["compliant"])
         self.assertIn("missing required skills", entries["required_skill_ids"]["detail"])
         self.assertFalse(entries["forbidden_source_patterns"]["compliant"])
         self.assertIn("remediation", entries["forbidden_source_patterns"])
+
+    def test_doctor_json_reports_contract_compliance(self) -> None:
+        write(
+            self.corp_repo / "org" / "config.toml",
+            """
+            id = "shadowknight"
+            enabled_sources = ["shared-ext"]
+            enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
+            required_contracts = ["corp.shadowknight.contract.definition-of-done"]
+            recommended_agent_types = ["shell"]
+            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
+            protected_fields = ["baseline_policies", "privacy_rules"]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.definition-of-done"
+            kind = "contract"
+            title = "Definition Of Done"
+            privacy = "repo-safe"
+            policy_rules = [
+              { rule = "required_contract_ids", severity = "fail", contract_ids = ["corp.shadowknight.contract.missing-evidence"], remediation = "Require the evidence contract" }
+            ]
+            """,
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md",
+            "Definition of done contract",
+        )
+        self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 1)
+        report = json.loads(stdout.getvalue())
+        self.assertIn("contract_compliance", report)
+        self.assertIn("corp.shadowknight.contract.definition-of-done", report["resolution"]["active_contracts"])
+        entries = {entry["rule"]: entry for entry in report["contract_compliance"]}
+        self.assertFalse(entries["required_contract_ids"]["compliant"])
+        self.assertIn("missing required contracts", entries["required_contract_ids"]["detail"])
+
+    def test_contract_evidence_requirements_surface_in_context_and_audit(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'required_contracts = ["corp.shadowknight.contract.definition-of-done"]\n',
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.definition-of-done"
+            kind = "contract"
+            title = "Definition Of Done"
+            privacy = "repo-safe"
+            evidence_required = [
+              "tests_run",
+              "files_changed_summary",
+              "risk_notes",
+              "verification_command_output"
+            ]
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Show evidence before done.")
+
+        machine = self.configure_machine()
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        result = resolve_workspace(self.internal_repo, machine, corp, user)
+        self.assertIn("corp.shadowknight.contract.definition-of-done", result.active_contracts)
+        self.assertEqual(
+            result.to_dict()["items"]["corp.shadowknight.contract.definition-of-done"]["evidence_required"],
+            ["tests_run", "files_changed_summary", "risk_notes", "verification_command_output"],
+        )
+
+        write_sync_output(result)
+        index = (self.internal_repo / ".agents" / "index.md").read_text(encoding="utf-8")
+        agents = (self.internal_repo / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Required Evidence Before Done", index)
+        self.assertIn("tests_run", index)
+        self.assertIn("Required Evidence Before Done", agents)
+        self.assertIn("verification_command_output", agents)
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
+        self.assertEqual(exit_code, 0)
+        audit = json.loads(stdout.getvalue())
+        self.assertEqual(
+            audit["evidence_requirements"]["corp.shadowknight.contract.definition-of-done"],
+            ["tests_run", "files_changed_summary", "risk_notes", "verification_command_output"],
+        )
+
+    def test_user_layer_cannot_replace_required_contract(self) -> None:
+        org_config = self.corp_repo / "org" / "config.toml"
+        org_config.write_text(
+            org_config.read_text(encoding="utf-8")
+            + 'required_contracts = ["corp.shadowknight.contract.definition-of-done"]\n',
+            encoding="utf-8",
+        )
+        write(
+            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.definition-of-done"
+            kind = "contract"
+            title = "Definition Of Done"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Required contract")
+        write(
+            self.user_layer / "contracts" / "definition-of-done" / "item.toml",
+            """
+            id = "corp.shadowknight.contract.definition-of-done"
+            kind = "contract"
+            title = "Weakened Definition Of Done"
+            privacy = "repo-safe"
+            """,
+        )
+        write(self.user_layer / "contracts" / "definition-of-done" / "body.md", "User replacement")
+        machine = MachineConfig(
+            corp_repo_path=self.corp_repo,
+            user_layer_path=self.user_layer,
+            cache_root=self.cache_root,
+            default_tool_target="all",
+        )
+        corp = load_corp_repo(machine.corp_repo_path)
+        user = load_user_layer(machine.user_layer_path)
+        with self.assertRaisesRegex(ResolutionError, "may not replace required item"):
+            resolve_workspace(self.internal_repo, machine, corp, user)
 
     def test_client_resolution_json_does_not_inline_corp_private_bodies(self) -> None:
         write(
@@ -913,20 +2461,25 @@ class TeamAgentsTests(unittest.TestCase):
         )
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.client_private_repo, machine, corp, user)
         write_sync_output(result)
         payload = json.loads((self.client_private_repo / ".agents" / "resolution.json").read_text(encoding="utf-8"))
+        manifest = json.loads((self.client_private_repo / ".agents" / "artifacts.json").read_text(encoding="utf-8"))
         shell_skill = payload["items"]["corp.shadowknight.skill.shell-global"]
         self.assertIn("body", shell_skill)
         for item in payload["items"].values():
             if item["privacy"] == "corp-private":
                 self.assertNotIn("body", item)
+        manifest_paths = {entry["path"]: entry for entry in manifest["artifacts"]}
+        self.assertFalse(manifest_paths["AGENTS.md"]["safe_to_commit"])
+        self.assertFalse(manifest_paths[".agents/index.md"]["safe_to_commit"])
+        self.assertEqual(manifest_paths["AGENTS.md"]["target"], "codex")
 
     def test_internal_tracked_agents_without_markers_gets_managed_block_appended(self) -> None:
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         write_sync_output(result)
         content = (self.internal_repo / "AGENTS.md").read_text(encoding="utf-8")
@@ -957,7 +2510,7 @@ class TeamAgentsTests(unittest.TestCase):
         )
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         self.assertEqual(result.source_details["shared-ext"].trust_status, "verified-manifest-fingerprint")
 
@@ -965,7 +2518,7 @@ class TeamAgentsTests(unittest.TestCase):
         corp_dest = self.root / "generated-corp"
         user_dest = self.root / "generated-user"
         self.assertEqual(main(["init-corp-repo", "--dest", str(corp_dest)]), 0)
-        self.assertEqual(main(["init-user-overrides", "--dest", str(user_dest)]), 0)
+        self.assertEqual(main(["init-user-layer", "--dest", str(user_dest)]), 0)
         self.assertTrue((corp_dest / "org" / "config.toml").exists())
         self.assertTrue((user_dest / "config.toml").exists())
 
@@ -977,13 +2530,13 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
                 "--init-corp-if-missing",
                 "--init-user-if-missing",
-                "--import-codex-skills-from",
+                "--import-skills-from",
                 str(self.root / "external-source"),  # no skills in native codex format, should still be safe
             ]
         )
@@ -999,7 +2552,7 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
@@ -1040,15 +2593,15 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
                 "--init-corp-if-missing",
                 "--init-user-if-missing",
-                "--import-codex-skills-from",
+                "--import-skills-from",
                 str(source_root),
-                "--import-codex-skills-to",
+                "--import-skills-to",
                 "org",
             ]
         )
@@ -1067,7 +2620,7 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
@@ -1089,7 +2642,7 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
@@ -1112,17 +2665,29 @@ class TeamAgentsTests(unittest.TestCase):
         write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
         result = main(["refresh-personal-skills", "--source", str(source_root)])
         self.assertEqual(result, 0)
-        self.assertTrue((machine.user_override_path / "skills" / "reviewer").exists())
+        self.assertTrue((machine.user_layer_path / "skills" / "reviewer").exists())
 
         (source_root / "reviewer" / "SKILL.md").unlink()
         write(source_root / "linter" / "SKILL.md", "# Linter")
         result = main(["refresh-personal-skills", "--source", str(source_root)])
         self.assertEqual(result, 0)
-        user_config = (machine.user_override_path / "config.toml").read_text(encoding="utf-8")
-        self.assertFalse((machine.user_override_path / "skills" / "reviewer").exists())
-        self.assertTrue((machine.user_override_path / "skills" / "linter").exists())
+        user_config = (machine.user_layer_path / "config.toml").read_text(encoding="utf-8")
+        self.assertFalse((machine.user_layer_path / "skills" / "reviewer").exists())
+        self.assertTrue((machine.user_layer_path / "skills" / "linter").exists())
         self.assertNotIn("user.local.skill.reviewer", user_config)
         self.assertIn("user.local.skill.linter", user_config)
+
+    def test_refresh_personal_skills_can_import_without_auto_enabling(self) -> None:
+        machine = self.configure_machine()
+        source_root = self.root / "codex-skills"
+        write(source_root / "reviewer" / "SKILL.md", "# Reviewer")
+        result = main(["refresh-personal-skills", "--source", str(source_root), "--no-enable-imported"])
+        self.assertEqual(result, 0)
+
+        user_config = (machine.user_layer_path / "config.toml").read_text(encoding="utf-8")
+        self.assertTrue((machine.user_layer_path / "skills" / "reviewer").exists())
+        self.assertNotIn("user.local.skill.reviewer", user_config)
+        self.assertIn("user.local.skill.personal-shell", user_config)
 
     def test_onboard_repo_registers_repo_group_and_syncs(self) -> None:
         self.configure_machine()
@@ -1461,6 +3026,48 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn('disabled_skills = ["corp.shadowknight.skill.platform-shared"]', group_config)
         self.assertIn('enabled_sources = ["shared-ext"]', group_config)
 
+    def test_configure_org_updates_org_layer_deltas(self) -> None:
+        machine = self.configure_machine()
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "configure-org",
+                    "--enable-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--minimal-enable-skill",
+                    "corp.shadowknight.skill.repo-onboarding",
+                    "--enable-source",
+                    "shared-ext",
+                    "--recommended-agent-type",
+                    "shell",
+                    "--recommended-agent-type",
+                    "reviewer",
+                    "--no-sync",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["synced"])
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", payload["org_layer"]["enabled_skills"])
+        self.assertIn("corp.shadowknight.skill.repo-onboarding", payload["org_layer"]["minimal_enabled_skills"])
+        self.assertIn("shared-ext", payload["org_layer"]["enabled_sources"])
+        self.assertEqual(payload["org_layer"]["recommended_agent_types"], ["shell", "reviewer"])
+
+        org_config = (machine.corp_repo_path / "org" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn(
+            'enabled_skills = ["corp.shadowknight.skill.shell-global", "corp.shadowknight.skill.repo-onboarding"]',
+            org_config,
+        )
+        self.assertIn(
+            'minimal_enabled_skills = ["corp.shadowknight.skill.shell-global", "corp.shadowknight.skill.repo-onboarding"]',
+            org_config,
+        )
+        self.assertIn('enabled_sources = ["shared-ext"]', org_config)
+        self.assertIn('recommended_agent_types = ["shell", "reviewer"]', org_config)
+
     def test_complete_skill_disables_one_time_skill_at_repo_scope(self) -> None:
         machine = self.configure_machine()
         self.assertEqual(
@@ -1538,7 +3145,7 @@ class TeamAgentsTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["scope"], "binding")
         self.assertNotIn("corp.shadowknight.skill.repo-onboarding", payload["enabled_skills"])
-        user_config = machine.user_override_path / "config.toml"
+        user_config = machine.user_layer_path / "config.toml"
         self.assertIn('disabled_skills = ["corp.shadowknight.skill.repo-onboarding"]', user_config.read_text(encoding="utf-8"))
 
     def test_onboard_repo_prompts_for_missing_values(self) -> None:
@@ -1592,7 +3199,7 @@ class TeamAgentsTests(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         resolution = resolve_workspace(bound, machine, corp, user)
         self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
         self.assertIn("corp.shadowknight.skill.platform-shared", resolution.enabled_skills)
@@ -1625,7 +3232,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(payload["repo_group_id"], "platform")
         self.assertTrue(payload["synced"])
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         resolution = resolve_workspace(bound, machine, corp, user)
         self.assertEqual(resolution.workspace_context.matched_repo_group_id, "platform")
         self.assertTrue((bound / ".agents" / "resolution.json").exists())
@@ -1638,7 +3245,7 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
@@ -1760,7 +3367,7 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_dest),
-                "--user-overrides",
+                "--user-path",
                 str(user_dest),
                 "--cache-root",
                 str(self.cache_root),
@@ -1773,17 +3380,23 @@ class TeamAgentsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(result, 0)
-        promote_result = main(
-            [
-                "promote-skills",
-                "--from-layer",
-                "user",
-                "--to-layer",
-                "org",
-                "--all-imported",
-            ]
-        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            promote_result = main(
+                [
+                    "promote-skills",
+                    "--from-layer",
+                    "user",
+                    "--to-layer",
+                    "org",
+                    "--all-imported",
+                ]
+            )
         self.assertEqual(promote_result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["promoted_skill_ids"], ["corp.example-org.skill.reviewer"])
+        self.assertIn("missing promotion_checklist", payload["warnings"][0])
         user_config = (user_dest / "config.toml").read_text(encoding="utf-8")
         org_config = (corp_dest / "org" / "config.toml").read_text(encoding="utf-8")
         self.assertNotIn("user.local.skill.reviewer", user_config)
@@ -1794,6 +3407,58 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("corp.example-org.doc.reviewer-notes-md", body)
         doc_item = (corp_dest / "org" / "docs" / "reviewer-notes-md" / "item.toml").read_text(encoding="utf-8")
         self.assertIn('id = "corp.example-org.doc.reviewer-notes-md"', doc_item)
+
+    def test_promote_skills_preserves_promotion_checklist_without_warning(self) -> None:
+        self.configure_machine()
+        user_config = self.user_layer / "config.toml"
+        user_config.write_text(
+            user_config.read_text(encoding="utf-8").replace(
+                'enabled_skills = ["user.local.skill.personal-shell"]',
+                'enabled_skills = ["user.local.skill.personal-shell", "user.local.skill.evidence-backed"]',
+            ),
+            encoding="utf-8",
+        )
+        write(
+            self.user_layer / "skills" / "evidence-backed" / "item.toml",
+            """
+            id = "user.local.skill.evidence-backed"
+            kind = "skill"
+            title = "Evidence Backed"
+            privacy = "repo-safe"
+
+            [promotion_checklist]
+            task = "Review database migrations"
+            applicability = "Python services with Alembic migrations"
+            evidence = "Caught missing downgrade paths in sampled PRs"
+            risks = "May over-warn for data-only migrations"
+            scope = "Migration review only"
+            redundancy = "Not covered by existing contracts"
+            """,
+        )
+        write(self.user_layer / "skills" / "evidence-backed" / "body.md", "Evidence backed body")
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            promote_result = main(
+                [
+                    "promote-skills",
+                    "--from-layer",
+                    "user",
+                    "--to-layer",
+                    "org",
+                    "--skill-id",
+                    "user.local.skill.evidence-backed",
+                ]
+            )
+
+        self.assertEqual(promote_result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["warnings"], [])
+        promoted_item = (self.corp_repo / "org" / "skills" / "evidence-backed" / "item.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "corp.shadowknight.skill.evidence-backed"', promoted_item)
+        self.assertIn("[promotion_checklist]", promoted_item)
+        self.assertIn('evidence = "Caught missing downgrade paths in sampled PRs"', promoted_item)
 
     def test_register_repo_creates_mapping(self) -> None:
         machine = self.configure_machine()
@@ -1817,81 +3482,6 @@ class TeamAgentsTests(unittest.TestCase):
         index_content = (machine.corp_repo_path / "indexes" / "repos.toml").read_text(encoding="utf-8")
         self.assertIn('id = "local-internal"', index_content)
 
-    def test_migrate_user_overrides_moves_legacy_tree_and_is_idempotent(self) -> None:
-        legacy_root = self.home / ".team-agents-user"
-        write(
-            legacy_root / "config.toml",
-            """
-            id = "legacy"
-            enabled_skills = ["user.legacy.skill.legacy-review"]
-            """,
-        )
-        write(
-            legacy_root / "skills" / "legacy-review" / "item.toml",
-            """
-            id = "user.legacy.skill.legacy-review"
-            kind = "skill"
-            title = "Legacy Review"
-            privacy = "repo-safe"
-            """,
-        )
-        write(legacy_root / "skills" / "legacy-review" / "body.md", "legacy review body")
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = main(
-                [
-                    "migrate-user-overrides",
-                    "--user",
-                    "legacy",
-                    "--corp-repo",
-                    str(self.corp_repo),
-                    "--cache-root",
-                    str(self.cache_root),
-                    "--json",
-                ]
-            )
-        self.assertEqual(result, 0)
-        payload = json.loads(stdout.getvalue())
-        migrated_skill = self.corp_repo / "users" / "legacy" / "skills" / "legacy-review" / "body.md"
-        self.assertTrue(migrated_skill.exists())
-        self.assertTrue(payload["moved"])
-        self.assertTrue((self.cache_root / "logs" / "migrations" / "migrate-user-overrides-legacy.json").exists())
-
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = main(
-                [
-                    "migrate-user-overrides",
-                    "--user",
-                    "legacy",
-                    "--corp-repo",
-                    str(self.corp_repo),
-                    "--cache-root",
-                    str(self.cache_root),
-                    "--json",
-                ]
-            )
-        self.assertEqual(result, 0)
-        rerun = json.loads(stdout.getvalue())
-        self.assertTrue(rerun["skipped"])
-
-        setup_result = main(
-            [
-                "setup",
-                "--corp-repo",
-                str(self.corp_repo),
-                "--user",
-                "legacy",
-                "--cache-root",
-                str(self.cache_root),
-            ]
-        )
-        self.assertEqual(setup_result, 0)
-        global_skill = (self.home / ".claude" / "skills" / "legacy-review" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("legacy review body", global_skill)
-
     def test_update_refreshes_user_global_and_recent_workspace_outputs(self) -> None:
         git(self.corp_repo, "init")
         git(self.corp_repo, "config", "user.email", "test@example.com")
@@ -1910,8 +3500,8 @@ class TeamAgentsTests(unittest.TestCase):
                 "setup",
                 "--corp-repo",
                 str(corp_clone),
-                "--user-overrides",
-                str(self.user_overrides),
+                "--user-path",
+                str(self.user_layer),
                 "--cache-root",
                 str(self.cache_root),
             ]

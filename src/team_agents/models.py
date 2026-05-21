@@ -6,12 +6,22 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class TargetSettings:
+    mode: str | None = None
+    include: bool = True
+    summary_budget: str | None = None
+    globs: list[str] = field(default_factory=list)
+    always_apply: bool | None = None
+
+
+@dataclass(slots=True)
 class MachineConfig:
     corp_repo_path: Path
-    user_override_path: Path
+    user_layer_path: Path
     cache_root: Path
     default_tool_target: str = "all"
     user_name: str | None = None
+    materialization_strategy: str = "auto"
 
 
 @dataclass(slots=True)
@@ -30,6 +40,7 @@ class WorkspaceBinding:
     path: Path
     repo_id: str | None = None
     repo_group_id: str | None = None
+    profile: str | None = None
     disabled_skills: list[str] = field(default_factory=list)
 
 
@@ -38,16 +49,54 @@ class LayerConfig:
     layer_name: str
     layer_path: Path
     identifier: str
+    owner: str | None = None
+    maintainer: str | None = None
+    lifecycle_status: str = "active"
+    review_status: str = "unreviewed"
+    deprecated_by: str | None = None
+    sunset_after: str | None = None
+    autonomy_level: str = "interactive"
+    requires_human_approval: list[str] = field(default_factory=list)
+    stop_conditions: list[str] = field(default_factory=list)
+    escalation_contact: str | None = None
+    allowed_tool_classes: list[str] = field(default_factory=list)
+    requires_approval_for: list[str] = field(default_factory=list)
+    forbidden_tool_classes: list[str] = field(default_factory=list)
+    intended_consumers: list[str] = field(default_factory=list)
+    context_quality_max_active_items: int | None = None
     enabled_sources: list[str] = field(default_factory=list)
     disabled_sources: list[str] = field(default_factory=list)
     enabled_skills: list[str] = field(default_factory=list)
     disabled_skills: list[str] = field(default_factory=list)
+    recommended_skills: list[str] = field(default_factory=list)
     baseline_policies: list[str] = field(default_factory=list)
     optional_policies: list[str] = field(default_factory=list)
     disabled_optional_policies: list[str] = field(default_factory=list)
+    recommended_policies: list[str] = field(default_factory=list)
     docs: list[str] = field(default_factory=list)
     disabled_docs: list[str] = field(default_factory=list)
+    recommended_docs: list[str] = field(default_factory=list)
+    required_contracts: list[str] = field(default_factory=list)
+    optional_contracts: list[str] = field(default_factory=list)
+    disabled_optional_contracts: list[str] = field(default_factory=list)
+    recommended_contracts: list[str] = field(default_factory=list)
+    required_packs: list[str] = field(default_factory=list)
+    enabled_packs: list[str] = field(default_factory=list)
+    disabled_packs: list[str] = field(default_factory=list)
+    recommended_packs: list[str] = field(default_factory=list)
+    enabled_flows: list[str] = field(default_factory=list)
+    disabled_flows: list[str] = field(default_factory=list)
+    recommended_flows: list[str] = field(default_factory=list)
+    enabled_profiles: list[str] = field(default_factory=list)
+    disabled_profiles: list[str] = field(default_factory=list)
+    recommended_profiles: list[str] = field(default_factory=list)
     recommended_agent_types: list[str] = field(default_factory=list)
+    allowed_profiles: list[str] = field(default_factory=list)
+    default_profile: str | None = None
+    languages: list[str] = field(default_factory=list)
+    frameworks: list[str] = field(default_factory=list)
+    framework_versions: dict[str, str] = field(default_factory=dict)
+    repo_tags: list[str] = field(default_factory=list)
     item_overrides: list[ItemOverride] = field(default_factory=list)
     normalized_remotes: list[str] = field(default_factory=list)
     repo_group_id: str | None = None
@@ -69,6 +118,7 @@ class SourceDefinition:
     path: Path
     source_type: str = "external"
     fingerprint: str | None = None
+    trust_level: str | None = None
 
 
 @dataclass(slots=True)
@@ -97,6 +147,19 @@ class Item:
     slug: str
     item_path: Path
     body_path: Path
+    owner: str | None = None
+    maintainer: str | None = None
+    lifecycle_status: str = "active"
+    review_status: str = "unreviewed"
+    deprecated_by: str | None = None
+    sunset_after: str | None = None
+    autonomy_level: str = "interactive"
+    requires_human_approval: list[str] = field(default_factory=list)
+    stop_conditions: list[str] = field(default_factory=list)
+    escalation_contact: str | None = None
+    allowed_tool_classes: list[str] = field(default_factory=list)
+    requires_approval_for: list[str] = field(default_factory=list)
+    forbidden_tool_classes: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     recommended_agent_types: list[str] = field(default_factory=list)
     timeout_seconds: int | None = None
@@ -105,14 +168,31 @@ class Item:
     claude_model: str | None = None
     cursor_globs: list[str] = field(default_factory=list)
     cursor_always_apply: bool | None = None
+    target_settings: dict[str, TargetSettings] = field(default_factory=dict)
     policy_rules: list[dict[str, Any]] = field(default_factory=list)
     usage_mode: str = "reusable"
+    activation_required: list[str] = field(default_factory=list)
+    activation_enabled: list[str] = field(default_factory=list)
+    promotion_checklist: dict[str, str] = field(default_factory=dict)
+    trust_level: str = "unreviewed"
+    trust_level_explicit: bool = False
+    allows_scripts: bool = False
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    applies_to_languages: list[str] = field(default_factory=list)
+    applies_to_frameworks: list[str] = field(default_factory=list)
+    compatible_versions: dict[str, str] = field(default_factory=dict)
+    repo_tags: list[str] = field(default_factory=list)
+    inputs: list[str] = field(default_factory=list)
+    outputs: list[str] = field(default_factory=list)
+    evidence_required: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class LayerData:
     config: LayerConfig
     items: dict[str, Item]
+    profiles: dict[str, LayerConfig] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -125,7 +205,7 @@ class CorpRepo:
 
 
 @dataclass(slots=True)
-class UserOverrides:
+class UserLayer:
     root: Path
     layer: LayerData
     personal_sources: dict[str, SourceDefinition]
@@ -143,6 +223,7 @@ class WorkspaceContext:
     is_unknown: bool = False
     is_non_git: bool = False
     binding_name: str | None = None
+    profile: str | None = None
     binding_disabled_skills: list[str] = field(default_factory=list)
 
 
@@ -152,6 +233,7 @@ class ResolvedItem:
     layer_name: str
     status: str
     activated_by: list[str] = field(default_factory=list)
+    activation_reason: str | None = None
     overridden_by: list[str] = field(default_factory=list)
     replaced_from: dict[str, str] | None = None
     denied_reason: str | None = None
@@ -166,13 +248,47 @@ class ResolvedItem:
             "source_type": self.item.source_type,
             "source_namespace": self.item.source_namespace,
             "source_ref": self.item.source_ref,
+            "source_path": str(self.item.item_path),
             "slug": self.item.slug,
             "status": self.status,
+            "lifecycle_status": self.item.lifecycle_status,
             "layer_name": self.layer_name,
             "activated_by": self.activated_by,
+            "activation_reason": self.activation_reason,
+            "activation_state": self.activation_reason or "active",
+            "required": self.activation_reason == "required",
+            "selected_by_packs": selected_by_kind(self.activated_by, "pack"),
+            "selected_by_profiles": selected_by_kind(self.activated_by, "profile"),
+            "target_outputs": target_outputs_for_item(self.item),
+            "privacy_status": self.item.privacy,
+            "trust_level": self.item.trust_level,
+            "allows_scripts": self.item.allows_scripts,
             "overridden_by": self.overridden_by,
             "active": self.active,
         }
+        if self.item.owner:
+            data["owner"] = self.item.owner
+        if self.item.maintainer:
+            data["maintainer"] = self.item.maintainer
+        data["review_status"] = self.item.review_status
+        if self.item.deprecated_by:
+            data["deprecated_by"] = self.item.deprecated_by
+        if self.item.sunset_after:
+            data["sunset_after"] = self.item.sunset_after
+        if self.item.autonomy_level != "interactive":
+            data["autonomy_level"] = self.item.autonomy_level
+        if self.item.requires_human_approval:
+            data["requires_human_approval"] = self.item.requires_human_approval
+        if self.item.stop_conditions:
+            data["stop_conditions"] = self.item.stop_conditions
+        if self.item.escalation_contact:
+            data["escalation_contact"] = self.item.escalation_contact
+        if self.item.allowed_tool_classes:
+            data["allowed_tool_classes"] = self.item.allowed_tool_classes
+        if self.item.requires_approval_for:
+            data["requires_approval_for"] = self.item.requires_approval_for
+        if self.item.forbidden_tool_classes:
+            data["forbidden_tool_classes"] = self.item.forbidden_tool_classes
         if self.replaced_from:
             data["replaced_from"] = self.replaced_from
         if self.denied_reason:
@@ -193,13 +309,75 @@ class ResolvedItem:
             data["cursor_globs"] = self.item.cursor_globs
         if self.item.cursor_always_apply is not None:
             data["cursor_always_apply"] = self.item.cursor_always_apply
+        if self.item.target_settings:
+            data["target_settings"] = {
+                target: {
+                    key: value
+                    for key, value in {
+                        "mode": settings.mode,
+                        "include": settings.include,
+                        "summary_budget": settings.summary_budget,
+                        "globs": settings.globs,
+                        "always_apply": settings.always_apply,
+                    }.items()
+                    if value not in (None, [])
+                }
+                for target, settings in sorted(self.item.target_settings.items())
+            }
         if self.item.policy_rules:
             data["policy_rules"] = self.item.policy_rules
         if self.item.usage_mode != "reusable":
             data["usage_mode"] = self.item.usage_mode
+        if self.item.promotion_checklist:
+            data["promotion_checklist"] = self.item.promotion_checklist
+        if self.item.reviewed_by:
+            data["reviewed_by"] = self.item.reviewed_by
+        if self.item.reviewed_at:
+            data["reviewed_at"] = self.item.reviewed_at
+        if self.item.applies_to_languages:
+            data["applies_to_languages"] = self.item.applies_to_languages
+        if self.item.applies_to_frameworks:
+            data["applies_to_frameworks"] = self.item.applies_to_frameworks
+        if self.item.compatible_versions:
+            data["compatible_versions"] = self.item.compatible_versions
+        if self.item.repo_tags:
+            data["repo_tags"] = self.item.repo_tags
+        if self.item.inputs:
+            data["inputs"] = self.item.inputs
+        if self.item.outputs:
+            data["outputs"] = self.item.outputs
+        if self.item.evidence_required:
+            data["evidence_required"] = self.item.evidence_required
+        if self.item.activation_required or self.item.activation_enabled:
+            data["activation"] = {
+                key: value
+                for key, value in {
+                    "required": self.item.activation_required,
+                    "enabled": self.item.activation_enabled,
+                }.items()
+                if value
+            }
         if include_body:
             data["body"] = self.item.body
         return data
+
+
+def selected_by_kind(activated_by: list[str], prefix: str) -> list[str]:
+    marker = f"{prefix}:"
+    return [value.removeprefix(marker) for value in activated_by if value.startswith(marker)]
+
+
+def target_outputs_for_item(item: Item) -> list[str]:
+    outputs: list[str] = []
+    for target in ["claude", "codex", "cursor"]:
+        settings = item.target_settings.get(target)
+        if settings is not None:
+            if settings.include:
+                outputs.append(target)
+            continue
+        if not item.target_tools or target in item.target_tools:
+            outputs.append(target)
+    return outputs
 
 
 @dataclass(slots=True)
@@ -212,10 +390,16 @@ class ResolutionResult:
     enabled_skills: list[str]
     active_policies: list[str]
     active_docs: list[str]
+    active_contracts: list[str]
+    active_packs: list[str]
+    active_flows: list[str]
+    active_profiles: list[str]
+    recommended_items: list[str]
     recommended_agent_types: list[str]
     items: dict[str, ResolvedItem]
     warnings: list[str] = field(default_factory=list)
     denied_items: dict[str, ResolvedItem] = field(default_factory=dict)
+    selected_profile_configs: list[LayerConfig] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         repo_class = self.workspace_context.repo_class or "unknown"
@@ -227,6 +411,7 @@ class ResolutionResult:
             "matched_repo_id": self.workspace_context.matched_repo_id,
             "matched_repo_group_id": self.workspace_context.matched_repo_group_id,
             "binding_name": self.workspace_context.binding_name,
+            "profile": self.workspace_context.profile,
             "repo_class": repo_class,
             "layer_chain": self.layer_chain,
             "applied_layers": self.applied_layers,
@@ -247,8 +432,36 @@ class ResolutionResult:
             "enabled_skills": self.enabled_skills,
             "active_policies": self.active_policies,
             "active_docs": self.active_docs,
+            "active_contracts": self.active_contracts,
+            "active_packs": self.active_packs,
+            "active_flows": self.active_flows,
+            "active_profiles": self.active_profiles,
+            "recommended_items": self.recommended_items,
             "recommended_agent_types": self.recommended_agent_types,
             "warnings": self.warnings,
+            "selected_profile_configs": [
+                {
+                    key: value
+                    for key, value in {
+                        "id": profile.identifier,
+                        "layer_name": profile.layer_name,
+                        "owner": profile.owner,
+                        "maintainer": profile.maintainer,
+                        "status": profile.lifecycle_status,
+                        "review_status": profile.review_status,
+                        "autonomy_level": profile.autonomy_level,
+                        "requires_human_approval": profile.requires_human_approval,
+                        "stop_conditions": profile.stop_conditions,
+                        "escalation_contact": profile.escalation_contact,
+                        "allowed_tool_classes": profile.allowed_tool_classes,
+                        "requires_approval_for": profile.requires_approval_for,
+                        "forbidden_tool_classes": profile.forbidden_tool_classes,
+                        "intended_consumers": profile.intended_consumers,
+                    }.items()
+                    if value not in (None, [])
+                }
+                for profile in self.selected_profile_configs
+            ],
             "items": {},
             "denied_items": {},
         }

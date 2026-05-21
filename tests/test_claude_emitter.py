@@ -53,7 +53,7 @@ class ClaudeEmitterTests(unittest.TestCase):
         )
         self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
         target = self.home / ".claude" / "skills" / "reviewer" / "SKILL.md"
-        self.assertTrue(target.is_symlink())
+        self.assertFalse(target.is_symlink())
         self.assertNotEqual(target.resolve(), body_path.resolve())
         content = target.read_text(encoding="utf-8")
         self.assertTrue(content.startswith("---\nname: "))

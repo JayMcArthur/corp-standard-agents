@@ -1,4 +1,4 @@
 id = "client-private"
-normalized_remotes = ["git.example.test/demo/client-private"]
+normalized_remotes = ["__CLIENT_PRIVATE_REMOTE__"]
 repo_class = "client"
 enabled_skills = ["corp.shadowknight.skill.internal-ops"]

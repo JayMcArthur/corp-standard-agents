@@ -3,17 +3,11 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from team_agents.emitters import claude, codex, cursor
+from team_agents.emitters.common import merge_managed_block, resolve_tool_targets, target_included
 from team_agents.errors import ValidationError
-from team_agents.frontmatter import dump_frontmatter_value
+from team_agents.materialization import materialize_path
 from team_agents.models import Item, MachineConfig, SourceRef
-from team_agents.output import (
-    MANAGED_END,
-    MANAGED_START,
-    infer_skill_description,
-    render_skill_markdown,
-    resolve_tool_targets,
-    split_frontmatter,
-)
 
 
 def library_root(machine_config: MachineConfig) -> Path:
@@ -26,19 +20,30 @@ def seed_library(machine_config: MachineConfig, user_root: Path) -> Path:
     if not corp_root.exists():
         raise ValidationError(f"Corp repo path does not exist: {corp_root}")
     if not user_root.exists():
-        raise ValidationError(f"User profile path does not exist: {user_root}")
+        raise ValidationError(f"Local user layer path does not exist: {user_root}")
     root = library_root(machine_config)
     root.mkdir(parents=True, exist_ok=True)
-    ensure_symlink(root / "corp", corp_root, target_is_directory=True)
-    ensure_symlink(root / "user", user_root, target_is_directory=True)
+    (root / ".materialization-strategy").write_text(machine_config.materialization_strategy + "\n", encoding="utf-8")
+    materialize_path(
+        corp_root,
+        root / "corp",
+        strategy=machine_config.materialization_strategy,
+        target_is_directory=True,
+    )
+    materialize_path(
+        user_root,
+        root / "user",
+        strategy=machine_config.materialization_strategy,
+        target_is_directory=True,
+    )
     (root / "external").mkdir(parents=True, exist_ok=True)
     (root / "rendered").mkdir(parents=True, exist_ok=True)
     return root
 
 
-def ensure_external_library_checkout(root: Path, source_ref: SourceRef) -> Path:
+def ensure_external_library_checkout(root: Path, source_ref: SourceRef, strategy: str = "auto") -> Path:
     external_path = root / "external" / f"{source_ref.source_id}@{source_ref.commit}"
-    ensure_symlink(external_path, source_ref.checkout_path, target_is_directory=True)
+    materialize_path(source_ref.checkout_path, external_path, strategy=strategy, target_is_directory=True)
     return external_path
 
 def seed_user_global_outputs(machine_config: MachineConfig, user_root: Path, skill_items: list[Item]) -> list[Path]:
@@ -61,16 +66,21 @@ def seed_claude_user_skills(root: Path, skill_items: list[Item]) -> list[Path]:
     desired_slugs = {
         item.slug
         for item in skill_items
-        if not item.target_tools or "claude" in item.target_tools
+        if target_included(item, "claude")
     }
     prune_stale_claude_user_skills(root, claude_root, desired_slugs)
     written: list[Path] = []
     for item in skill_items:
-        if item.target_tools and "claude" not in item.target_tools:
+        if not target_included(item, "claude"):
             continue
         library_body = write_claude_library_skill(root, item)
         target = claude_root / item.slug / "SKILL.md"
-        ensure_symlink(target, library_body, target_is_directory=False)
+        materialize_path(
+            library_body,
+            target,
+            strategy=global_output_strategy(root),
+            target_is_directory=False,
+        )
         written.append(target)
     return written
 
@@ -79,7 +89,7 @@ def seed_codex_user_router(root: Path, skill_items: list[Item]) -> list[Path]:
     codex_path = Path.home() / ".codex" / "AGENTS.md"
     sections: list[str] = []
     for item in skill_items:
-        if item.target_tools and "codex" not in item.target_tools:
+        if not target_included(item, "codex"):
             continue
         sections.append(render_codex_section(root, item))
     managed = "\n\n".join(sections).strip()
@@ -95,16 +105,21 @@ def seed_cursor_user_rules(root: Path, skill_items: list[Item]) -> list[Path]:
     desired_slugs = {
         item.slug
         for item in skill_items
-        if not item.target_tools or "cursor" in item.target_tools
+        if target_included(item, "cursor")
     }
     prune_stale_cursor_user_rules(root, cursor_root, desired_slugs)
     written: list[Path] = []
     for item in skill_items:
-        if item.target_tools and "cursor" not in item.target_tools:
+        if not target_included(item, "cursor"):
             continue
         rendered = write_cursor_library_rule(root, item)
         target = cursor_root / f"{item.slug}.mdc"
-        ensure_symlink(target, rendered, target_is_directory=False)
+        materialize_path(
+            rendered,
+            target,
+            strategy=global_output_strategy(root),
+            target_is_directory=False,
+        )
         written.append(target)
     return written
 
@@ -112,14 +127,14 @@ def seed_cursor_user_rules(root: Path, skill_items: list[Item]) -> list[Path]:
 def write_claude_library_skill(root: Path, item: Item) -> Path:
     path = root / "rendered" / "claude" / "skills" / item.slug / "SKILL.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_skill_markdown(item), encoding="utf-8")
+    path.write_text(claude.render_skill_markdown(item), encoding="utf-8")
     return path
 
 
 def write_cursor_library_rule(root: Path, item: Item) -> Path:
     path = root / "rendered" / "cursor" / "rules" / f"{item.slug}.mdc"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_cursor_rule(item), encoding="utf-8")
+    path.write_text(cursor.render_rule(item), encoding="utf-8")
     return path
 
 
@@ -165,31 +180,18 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 def render_codex_section(root: Path, item: Item) -> str:
-    _, body = split_frontmatter(item.body)
-    source_path = body_library_reference(root, item)
-    lines = [
-        f"## {item.title}",
-        f"Library body: `{source_path}`",
-    ]
-    text = body.strip()
-    if text:
-        lines.extend(["", text])
-    return "\n".join(lines)
+    source_path = None
+    if library_strategy(root) != "render-only":
+        source_path = body_library_reference(root, item)
+    return codex.render_global_section(item, library_body=source_path)
+
+
+def render_codex_body(item: Item, body: str) -> str:
+    return codex.render_body(item, body)
 
 
 def render_cursor_rule(item: Item) -> str:
-    _, body = split_frontmatter(item.body)
-    description = item.source_note or infer_skill_description(body, item)
-    metadata: list[tuple[str, object]] = [("description", description)]
-    if item.cursor_globs:
-        metadata.append(("globs", item.cursor_globs))
-    if item.cursor_always_apply is not None:
-        metadata.append(("alwaysApply", item.cursor_always_apply))
-    lines = ["---"]
-    for key, value in metadata:
-        lines.append(f"{key}: {dump_frontmatter_value(value)}")
-    lines.extend(["---", "", body.strip()])
-    return "\n".join(lines).rstrip() + "\n"
+    return cursor.render_rule(item)
 
 
 def body_library_reference(root: Path, item: Item) -> Path:
@@ -213,6 +215,7 @@ def body_library_reference(root: Path, item: Item) -> Path:
                 fingerprint_mode="computed",
                 trust_status="verified-pinned-commit",
             ),
+            strategy=library_strategy(root),
         )
         return library_external / resolved_path.relative_to(checkout_root)
     source_root = Path(item.source_ref).resolve()
@@ -225,26 +228,15 @@ def body_library_reference(root: Path, item: Item) -> Path:
     return base / item.body_path.resolve().relative_to(source_root)
 
 
-def merge_managed_block(existing: str, managed_content: str) -> str:
-    managed_block = MANAGED_START + "\n" + managed_content + "\n" + MANAGED_END + "\n"
-    if not existing.strip():
-        return managed_block
-    if MANAGED_START in existing and MANAGED_END in existing:
-        before, remainder = existing.split(MANAGED_START, 1)
-        _, after = remainder.split(MANAGED_END, 1)
-        return before + MANAGED_START + "\n" + managed_content + "\n" + MANAGED_END + after
-    return existing.rstrip() + "\n\n" + managed_block
+def library_strategy(root: Path) -> str:
+    strategy_file = root / ".materialization-strategy"
+    if strategy_file.exists():
+        return strategy_file.read_text(encoding="utf-8").strip() or "auto"
+    return "auto"
 
 
-def ensure_symlink(path: Path, target: Path, *, target_is_directory: bool) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        if path.resolve() == target.resolve():
-            return
-        path.unlink()
-    elif path.exists():
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
-    path.symlink_to(target, target_is_directory=target_is_directory)
+def global_output_strategy(root: Path) -> str:
+    strategy = library_strategy(root)
+    if strategy == "render-only":
+        return "copy"
+    return strategy

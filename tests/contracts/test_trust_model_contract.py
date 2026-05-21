@@ -7,12 +7,12 @@ from unittest.mock import patch
 
 from team_agents.doctor import run_doctor
 from team_agents.errors import ValidationError
-from team_agents.loaders import load_corp_repo, load_user_overrides
+from team_agents.loaders import load_corp_repo, load_user_layer
 from team_agents.models import MachineConfig, SourceDefinition
 from team_agents.resolution import resolve_workspace
 from team_agents.sources import materialize_source
 from team_agents.trust import load_trust_store, resolve_trust_status, trust_store_path
-from tests.test_team_agents import create_corp_repo, create_external_source_repo, create_user_overrides, init_repo
+from tests.test_team_agents import create_corp_repo, create_external_source_repo, create_user_layer, init_repo
 
 
 class TrustModelContractTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class TrustModelContractTests(unittest.TestCase):
         self.home.mkdir()
         self.machine = MachineConfig(
             corp_repo_path=self.root / "corp-control",
-            user_override_path=self.root / "user-overrides",
+            user_layer_path=self.root / "user-layer",
             cache_root=self.home / ".team-agents" / "cache",
             default_tool_target="all",
         )
@@ -37,9 +37,9 @@ class TrustModelContractTests(unittest.TestCase):
             "git.example.test/demo/client-private",
             "git.example.test/demo/client-tracked",
         )
-        self.user_overrides = create_user_overrides(self.root)
+        self.user_layer = create_user_layer(self.root)
         self.machine.corp_repo_path = self.corp_repo
-        self.machine.user_override_path = self.user_overrides
+        self.machine.user_layer_path = self.user_layer
         self.workspace = self.root / "workspace-internal"
         init_repo(self.workspace, "https://git.example.test/demo/internal-app.git")
 
@@ -128,14 +128,14 @@ class TrustModelContractTests(unittest.TestCase):
 
     def test_trust_metadata_is_exposed_in_resolution_and_doctor_json(self) -> None:
         corp = load_corp_repo(self.corp_repo)
-        user = load_user_overrides(self.user_overrides)
+        user = load_user_layer(self.user_layer)
         result = resolve_workspace(self.workspace, self.machine, corp, user)
         source_detail = result.to_dict()["source_details"]["shared-ext"]
         self.assertIn("fingerprint", source_detail)
         self.assertIn("fingerprint_mode", source_detail)
         self.assertIn("trust_status", source_detail)
 
-        report = run_doctor(self.machine, self.workspace, self.corp_repo, self.user_overrides, result)
+        report = run_doctor(self.machine, self.workspace, self.corp_repo, self.user_layer, result)
         doctor_source_detail = report["resolution"]["source_details"]["shared-ext"]
         self.assertIn("fingerprint", doctor_source_detail)
         self.assertIn("fingerprint_mode", doctor_source_detail)

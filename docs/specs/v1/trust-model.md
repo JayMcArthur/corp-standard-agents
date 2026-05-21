@@ -97,4 +97,4 @@ Frozen trust fields:
 
 ## Notes
 
-- Human sign-off on this frozen contract is still required in the issue tracker.
+- This contract is maintained as public reference documentation.

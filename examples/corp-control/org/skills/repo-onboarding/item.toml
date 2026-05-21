@@ -1,0 +1,6 @@
+id = "corp.shadowknight.skill.repo-onboarding"
+kind = "skill"
+title = "Repo Onboarding"
+privacy = "repo-safe"
+usage_mode = "one-time"
+recommended_agent_types = ["shell"]

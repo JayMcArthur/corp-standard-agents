@@ -2,6 +2,17 @@ id = "corp.example.skill.multi-tool"
 kind = "skill"
 title = "Multi Tool"
 privacy = "repo-safe"
+owner = "platform-enablement"
+maintainer = "agent-standards"
+status = "active"
+review_status = "approved"
+autonomy_level = "supervised"
+requires_human_approval = ["deploy"]
+stop_conditions = ["secrets_detected"]
+escalation_contact = "platform-enablement"
+allowed_tool_classes = ["read", "edit", "test"]
+requires_approval_for = ["shell", "network"]
+forbidden_tool_classes = ["payment"]
 tags = ["core", "multi-tool"]
 recommended_agent_types = ["shell", "planner"]
 timeout_seconds = 45
@@ -11,3 +22,15 @@ target_tools = ["claude", "codex", "cursor"]
 claude_model = "opus"
 cursor_globs = ["src/**/*.py", "docs/**/*.md"]
 cursor_always_apply = true
+applies_to_languages = ["python"]
+applies_to_frameworks = ["django"]
+compatible_versions = { django = ">=4.2,<6" }
+repo_tags = ["web-api"]
+
+[promotion_checklist]
+task = "Review multi-tool changes"
+applicability = "Python repos using the standard test harness"
+evidence = "Reduced review misses in fixture evaluation"
+risks = "May over-focus on tool usage"
+scope = "Narrow review tasks only"
+redundancy = "Not covered by the definition-of-done contract"

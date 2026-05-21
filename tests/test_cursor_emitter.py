@@ -31,7 +31,7 @@ class CursorEmitterTests(unittest.TestCase):
             os.environ["HOME"] = self._old_home
         self.tmp.cleanup()
 
-    def test_setup_user_writes_cursor_rule_symlink_with_frontmatter(self) -> None:
+    def test_setup_user_writes_cursor_rule_with_frontmatter(self) -> None:
         write(
             self.corp / "users" / "alice" / "skills" / "reviewer" / "item.toml",
             """
@@ -55,7 +55,7 @@ class CursorEmitterTests(unittest.TestCase):
         )
         self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
         rule_path = self.home / ".cursor" / "rules" / "reviewer.mdc"
-        self.assertTrue(rule_path.is_symlink())
+        self.assertFalse(rule_path.is_symlink())
         content = rule_path.read_text(encoding="utf-8")
         expected = (
             "---\n"

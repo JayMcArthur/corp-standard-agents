@@ -9,22 +9,30 @@ WRAPPER_PATH="$BIN_DIR/team-agents"
 
 mkdir -p "$CACHE_ROOT" "$BIN_DIR"
 
-python3 -m venv --system-site-packages "$VENV_PATH"
-"$VENV_PATH/bin/python" -m pip install --no-build-isolation -e "$ROOT"
+INSTALL_MODE="venv"
+if python3 -m venv --system-site-packages "$VENV_PATH"; then
+  "$VENV_PATH/bin/python" -m pip install --no-build-isolation -e "$ROOT"
+  WRAPPER_EXEC='exec "'"$VENV_PATH"'/bin/team-agents" "$@"'
+else
+  INSTALL_MODE="source-wrapper"
+  rm -rf "$VENV_PATH"
+  WRAPPER_EXEC='PYTHONPATH="'"$ROOT"'/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m team_agents "$@"'
+fi
 
 cat >"$WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$VENV_PATH/bin/team-agents" "\$@"
+$WRAPPER_EXEC
 EOF
 chmod +x "$WRAPPER_PATH"
 
 cat <<EOF
 Install complete.
 
+Mode: $INSTALL_MODE
 Virtualenv: $VENV_PATH
 Wrapper: $WRAPPER_PATH
 
 Next step:
-  team-agents setup --corp-repo /path/to/corp-control --user <username>
+  team-agents setup --corp-repo /path/to/corp-control --user-path ~/team-agents-user
 EOF

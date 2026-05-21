@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 
 from team_agents.errors import ResolutionError
+from team_agents.emitters.common import MANAGED_END, MANAGED_START, write_workspace_router_file
 from team_agents.models import ResolutionResult, WorkspaceContext
-from team_agents.output import MANAGED_END, MANAGED_START, ROUTER_FILES, write_router_file
+from team_agents.output import ROUTER_FILES
 
 
 def git(path: Path, *args: str) -> str:
@@ -43,6 +44,11 @@ def make_result(workspace: Path, repo_class: str) -> ResolutionResult:
         enabled_skills=[],
         active_policies=[],
         active_docs=[],
+        active_contracts=[],
+        active_packs=[],
+        active_flows=[],
+        active_profiles=[],
+        recommended_items=[],
         recommended_agent_types=[],
         items={},
     )
@@ -61,8 +67,24 @@ class ToolRouterCollisionsContractTests(unittest.TestCase):
         workspace.mkdir()
         result = make_result(workspace, "internal")
         for router_name in ROUTER_FILES:
-            write_router_file(result, workspace, "internal", router_name)
-            self.assertTrue((workspace / router_name).exists(), router_name)
+            write_workspace_router_file(result, workspace, "internal", router_name)
+            path = workspace / router_name
+            self.assertTrue(path.exists(), router_name)
+            content = path.read_text(encoding="utf-8")
+            self.assertIn(MANAGED_START, content)
+            self.assertIn(MANAGED_END, content)
+
+    def test_first_and_second_router_writes_are_idempotent(self) -> None:
+        workspace = self.root / "workspace-idempotent"
+        workspace.mkdir()
+        result = make_result(workspace, "internal")
+        for router_name in ROUTER_FILES:
+            path = write_workspace_router_file(result, workspace, "internal", router_name)
+            first = path.read_text(encoding="utf-8")
+            write_workspace_router_file(result, workspace, "internal", router_name)
+            second = path.read_text(encoding="utf-8")
+            self.assertEqual(first, second)
+            self.assertEqual(second.count(MANAGED_START), 1)
 
     def test_tracked_targets_with_managed_block_are_replaced_in_client_repo(self) -> None:
         workspace = self.root / "workspace-client-managed"
@@ -71,7 +93,7 @@ class ToolRouterCollisionsContractTests(unittest.TestCase):
         for router_name in ROUTER_FILES:
             path = workspace / router_name
             write(path, f"before\n{MANAGED_START}\nold\n{MANAGED_END}\nafter\n")
-            write_router_file(result, workspace, "client", router_name)
+            write_workspace_router_file(result, workspace, "client", router_name)
             content = path.read_text(encoding="utf-8")
             self.assertIn("before", content)
             self.assertIn("after", content)
@@ -84,7 +106,7 @@ class ToolRouterCollisionsContractTests(unittest.TestCase):
         for router_name in ROUTER_FILES:
             path = workspace / router_name
             write(path, "manual content\n")
-            write_router_file(result, workspace, "internal", router_name)
+            write_workspace_router_file(result, workspace, "internal", router_name)
             content = path.read_text(encoding="utf-8")
             self.assertIn("manual content", content)
             self.assertIn(MANAGED_START, content)
@@ -98,5 +120,4 @@ class ToolRouterCollisionsContractTests(unittest.TestCase):
             path = workspace / router_name
             write(path, "manual content\n")
             with self.assertRaisesRegex(ResolutionError, "cannot be updated"):
-                write_router_file(result, workspace, "client", router_name)
-
+                write_workspace_router_file(result, workspace, "client", router_name)

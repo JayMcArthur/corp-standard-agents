@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from team_agents.loaders import load_corp_repo, load_user_overrides
+from team_agents.loaders import load_corp_repo, load_user_layer
 from team_agents.models import MachineConfig
 from team_agents.output import write_resolution_json
 from team_agents.resolution import resolve_workspace
 from team_agents.resolution_schema import RESOLUTION_JSON_V1_SCHEMA_PATH, load_resolution_json_schema, validate_resolution_json
-from tests.test_team_agents import create_corp_repo, create_external_source_repo, create_user_overrides, init_repo
+from tests.test_team_agents import create_corp_repo, create_external_source_repo, create_user_layer, init_repo
 
 
 class ResolutionJsonContractTests(unittest.TestCase):
@@ -30,12 +30,12 @@ class ResolutionJsonContractTests(unittest.TestCase):
             "git.example.test/demo/client-private",
             "git.example.test/demo/client-tracked",
         )
-        self.user_overrides = create_user_overrides(self.root)
+        self.user_layer = create_user_layer(self.root)
         self.workspace = self.root / "workspace-internal"
         init_repo(self.workspace, f"https://{self.internal_remote}.git")
         self.machine_config = MachineConfig(
             corp_repo_path=self.corp_repo,
-            user_override_path=self.user_overrides,
+            user_layer_path=self.user_layer,
             cache_root=self.home / ".team-agents" / "cache",
             default_tool_target="all",
         )
@@ -52,7 +52,7 @@ class ResolutionJsonContractTests(unittest.TestCase):
 
     def test_real_resolution_json_validates(self) -> None:
         corp = load_corp_repo(self.corp_repo)
-        user = load_user_overrides(self.user_overrides)
+        user = load_user_layer(self.user_layer)
         result = resolve_workspace(self.workspace, self.machine_config, corp, user)
         agents_dir = self.workspace / ".agents"
         agents_dir.mkdir()
@@ -63,7 +63,18 @@ class ResolutionJsonContractTests(unittest.TestCase):
         self.assertEqual(payload["matched_repo_id"], "internal-app")
         self.assertEqual(payload["applied_layers"][0]["layer_name"], "org")
         self.assertIn("shared-ext", payload["source_details"])
-        self.assertIn("activated_by", payload["items"]["corp.shadowknight.skill.shell-global"])
+        shell = payload["items"]["corp.shadowknight.skill.shell-global"]
+        self.assertIn("activated_by", shell)
+        self.assertIn("activation_reason", shell)
+        self.assertIn("layer_name", shell)
+        self.assertIn("selected_by_packs", shell)
+        self.assertIn("selected_by_profiles", shell)
+        self.assertIn("trust_level", shell)
+        self.assertIn("review_status", shell)
+        self.assertIn("privacy", shell)
+        self.assertIn("target_outputs", shell)
+        self.assertIn("warnings", payload)
+        self.assertIn("denied_items", payload)
 
     def test_missing_top_level_field_is_rejected(self) -> None:
         payload = self._valid_payload()
@@ -86,6 +97,6 @@ class ResolutionJsonContractTests(unittest.TestCase):
 
     def _valid_payload(self) -> dict:
         corp = load_corp_repo(self.corp_repo)
-        user = load_user_overrides(self.user_overrides)
+        user = load_user_layer(self.user_layer)
         result = resolve_workspace(self.workspace, self.machine_config, corp, user)
         return result.to_dict()

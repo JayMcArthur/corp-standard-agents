@@ -13,16 +13,29 @@ from team_agents.models import (
     LayerConfig,
     LayerData,
     SourceDefinition,
-    UserOverrides,
+    TargetSettings,
+    UserLayer,
     WorkspaceBinding,
 )
 from team_agents.toml_utils import read_toml
 from team_agents.validation import validate_canonical_id, validate_commit_hash, validate_repo_class, validate_source_id
 
 
-VALID_KINDS = {"skill": "skills", "policy": "policies", "doc": "docs"}
+VALID_KINDS = {
+    "skill": "skills",
+    "policy": "policies",
+    "doc": "docs",
+    "contract": "contracts",
+    "flow": "flows",
+    "pack": "packs",
+    "profile": "profiles",
+}
 VALID_PRIVACY = {"corp-private", "repo-safe"}
 VALID_SOURCE_TYPES = {"corp", "external", "user"}
+VALID_TRUST_LEVELS = {"unreviewed", "user-trusted", "corp-reviewed", "corp-required"}
+VALID_LIFECYCLE_STATUSES = {"draft", "active", "deprecated", "archived"}
+VALID_REVIEW_STATUSES = {"unreviewed", "reviewed", "approved"}
+VALID_AUTONOMY_LEVELS = {"interactive", "supervised", "background", "autonomous"}
 OVERRIDE_KEYS = {"enabled", "timeout_seconds", "recommended_agent_types", "tags", "source_note"}
 
 
@@ -43,16 +56,16 @@ def load_corp_repo(root: Path) -> CorpRepo:
     return CorpRepo(root=root, org=org, repo_groups=repo_groups, repos=repos, sources=sources)
 
 
-def load_user_overrides(root: Path) -> UserOverrides:
+def load_user_layer(root: Path) -> UserLayer:
     root = root.resolve()
     if not root.exists():
-        raise ValidationError(f"User override path does not exist: {root}")
+        raise ValidationError(f"User layer path does not exist: {root}")
     layer = load_layer(root, "user", source_type="user")
     data = read_toml(root / "config.toml")
     personal_sources = load_personal_sources(root / "sources")
     workspace_bindings = parse_workspace_bindings(data.get("workspace_binding", []), root)
     layer.config.workspace_bindings = workspace_bindings
-    return UserOverrides(root=root, layer=layer, personal_sources=personal_sources, workspace_bindings=workspace_bindings)
+    return UserLayer(root=root, layer=layer, personal_sources=personal_sources, workspace_bindings=workspace_bindings)
 
 
 def load_layer_map(parent: Path, layer_name: str) -> dict[str, LayerData]:
@@ -75,16 +88,54 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
         layer_name=layer_name,
         layer_path=path,
         identifier=identifier,
+        owner=_optional_str(raw.get("owner")),
+        maintainer=_optional_str(raw.get("maintainer")),
+        lifecycle_status=parse_lifecycle_status(raw.get("status"), config_path),
+        review_status=parse_review_status(raw.get("review_status"), config_path),
+        deprecated_by=_optional_str(raw.get("deprecated_by")),
+        sunset_after=_optional_str(raw.get("sunset_after")),
+        autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), config_path),
+        requires_human_approval=_str_list(raw.get("requires_human_approval")),
+        stop_conditions=_str_list(raw.get("stop_conditions")),
+        escalation_contact=_optional_str(raw.get("escalation_contact")),
+        allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
+        requires_approval_for=_str_list(raw.get("requires_approval_for")),
+        forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
+        intended_consumers=_str_list(raw.get("intended_consumers")),
+        context_quality_max_active_items=_optional_int(raw.get("context_quality_max_active_items")),
         enabled_sources=_str_list(raw.get("enabled_sources")),
         disabled_sources=_str_list(raw.get("disabled_sources")),
-        enabled_skills=_str_list(raw.get("enabled_skills")),
-        disabled_skills=_str_list(raw.get("disabled_skills")),
-        baseline_policies=_str_list(raw.get("baseline_policies")),
-        optional_policies=_str_list(raw.get("optional_policies")),
-        disabled_optional_policies=_str_list(raw.get("disabled_optional_policies")),
-        docs=_str_list(raw.get("docs")),
-        disabled_docs=_str_list(raw.get("disabled_docs")),
+        enabled_skills=_config_list(raw, "skills", "enabled", "enabled_skills"),
+        disabled_skills=_config_list(raw, "skills", "disabled", "disabled_skills"),
+        recommended_skills=_config_list(raw, "skills", "recommended", "recommended_skills"),
+        baseline_policies=_config_list(raw, "policies", "required", "baseline_policies"),
+        optional_policies=_config_list(raw, "policies", "enabled", "optional_policies"),
+        disabled_optional_policies=_config_list(raw, "policies", "disabled", "disabled_optional_policies"),
+        recommended_policies=_config_list(raw, "policies", "recommended", "recommended_policies"),
+        docs=_config_list(raw, "docs", "enabled", "docs"),
+        disabled_docs=_config_list(raw, "docs", "disabled", "disabled_docs"),
+        recommended_docs=_config_list(raw, "docs", "recommended", "recommended_docs"),
+        required_contracts=_config_list(raw, "contracts", "required", "required_contracts"),
+        optional_contracts=_config_list(raw, "contracts", "enabled", "optional_contracts"),
+        disabled_optional_contracts=_config_list(raw, "contracts", "disabled", "disabled_optional_contracts"),
+        recommended_contracts=_config_list(raw, "contracts", "recommended", "recommended_contracts"),
+        required_packs=_config_list(raw, "packs", "required", "required_packs"),
+        enabled_packs=_config_list(raw, "packs", "enabled", "enabled_packs"),
+        disabled_packs=_config_list(raw, "packs", "disabled", "disabled_packs"),
+        recommended_packs=_config_list(raw, "packs", "recommended", "recommended_packs"),
+        enabled_flows=_config_list(raw, "flows", "enabled", "enabled_flows"),
+        disabled_flows=_config_list(raw, "flows", "disabled", "disabled_flows"),
+        recommended_flows=_config_list(raw, "flows", "recommended", "recommended_flows"),
+        enabled_profiles=_config_list(raw, "profiles", "enabled", "enabled_profiles"),
+        disabled_profiles=_config_list(raw, "profiles", "disabled", "disabled_profiles"),
+        recommended_profiles=_config_list(raw, "profiles", "recommended", "recommended_profiles"),
         recommended_agent_types=_str_list(raw.get("recommended_agent_types", raw.get("preferred_agent_types"))),
+        allowed_profiles=_str_list(raw.get("allowed_profiles")),
+        default_profile=raw.get("default_profile"),
+        languages=_str_list(raw.get("languages")),
+        frameworks=_str_list(raw.get("frameworks")),
+        framework_versions=_str_dict(raw.get("framework_versions")),
+        repo_tags=_str_list(raw.get("repo_tags")),
         item_overrides=parse_item_overrides(raw.get("item_override", []), config_path),
         normalized_remotes=_str_list(raw.get("normalized_remotes")),
         repo_group_id=raw.get("repo_group_id"),
@@ -94,9 +145,138 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
         minimal_docs=_str_list(raw.get("minimal_docs")),
         protected_fields=set(_str_list(raw.get("protected_fields"))),
     )
+    apply_generalized_activation(config, raw, config_path)
     validate_layer_config(config, config_path)
     items = load_items(path, source_type=source_type, source_namespace=identifier)
-    return LayerData(config=config, items=items)
+    profiles = load_profile_configs(path)
+    return LayerData(config=config, items=items, profiles=profiles)
+
+
+def load_profile_configs(layer_root: Path) -> dict[str, LayerConfig]:
+    profiles_root = layer_root / "profiles"
+    if not profiles_root.exists():
+        return {}
+    profiles: dict[str, LayerConfig] = {}
+    for profile_path in sorted(profiles_root.glob("*.toml")):
+        if profile_path.name == "item.toml":
+            continue
+        raw = read_toml(profile_path)
+        identifier = str(raw.get("id") or profile_path.stem)
+        config = LayerConfig(
+            layer_name="profile",
+            layer_path=profile_path,
+            identifier=identifier,
+            owner=_optional_str(raw.get("owner")),
+            maintainer=_optional_str(raw.get("maintainer")),
+            lifecycle_status=parse_lifecycle_status(raw.get("status"), profile_path),
+            review_status=parse_review_status(raw.get("review_status"), profile_path),
+            deprecated_by=_optional_str(raw.get("deprecated_by")),
+            sunset_after=_optional_str(raw.get("sunset_after")),
+            autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), profile_path),
+            requires_human_approval=_str_list(raw.get("requires_human_approval")),
+            stop_conditions=_str_list(raw.get("stop_conditions")),
+            escalation_contact=_optional_str(raw.get("escalation_contact")),
+            allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
+            requires_approval_for=_str_list(raw.get("requires_approval_for")),
+            forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
+            intended_consumers=_str_list(raw.get("intended_consumers")),
+            context_quality_max_active_items=_optional_int(raw.get("context_quality_max_active_items")),
+            enabled_skills=_config_list(raw, "skills", "enabled", "enabled_skills"),
+            disabled_skills=_config_list(raw, "skills", "disabled", "disabled_skills"),
+            recommended_skills=_config_list(raw, "skills", "recommended", "recommended_skills"),
+            baseline_policies=_config_list(raw, "policies", "required", "baseline_policies"),
+            optional_policies=_config_list(raw, "policies", "enabled", "optional_policies"),
+            disabled_optional_policies=_config_list(raw, "policies", "disabled", "disabled_optional_policies"),
+            recommended_policies=_config_list(raw, "policies", "recommended", "recommended_policies"),
+            docs=_config_list(raw, "docs", "enabled", "docs"),
+            disabled_docs=_config_list(raw, "docs", "disabled", "disabled_docs"),
+            recommended_docs=_config_list(raw, "docs", "recommended", "recommended_docs"),
+            required_contracts=_config_list(raw, "contracts", "required", "required_contracts"),
+            optional_contracts=_config_list(raw, "contracts", "enabled", "optional_contracts"),
+            disabled_optional_contracts=_config_list(raw, "contracts", "disabled", "disabled_optional_contracts"),
+            recommended_contracts=_config_list(raw, "contracts", "recommended", "recommended_contracts"),
+            required_packs=_config_list(raw, "packs", "required", "required_packs"),
+            enabled_packs=_config_list(raw, "packs", "enabled", "enabled_packs"),
+            disabled_packs=_config_list(raw, "packs", "disabled", "disabled_packs"),
+            recommended_packs=_config_list(raw, "packs", "recommended", "recommended_packs"),
+            enabled_flows=_config_list(raw, "flows", "enabled", "enabled_flows"),
+            disabled_flows=_config_list(raw, "flows", "disabled", "disabled_flows"),
+            recommended_flows=_config_list(raw, "flows", "recommended", "recommended_flows"),
+            enabled_profiles=_config_list(raw, "profiles", "enabled", "enabled_profiles"),
+            disabled_profiles=_config_list(raw, "profiles", "disabled", "disabled_profiles"),
+            recommended_profiles=_config_list(raw, "profiles", "recommended", "recommended_profiles"),
+            recommended_agent_types=_str_list(raw.get("recommended_agent_types", raw.get("preferred_agent_types"))),
+            languages=_str_list(raw.get("languages")),
+            frameworks=_str_list(raw.get("frameworks")),
+            framework_versions=_str_dict(raw.get("framework_versions")),
+            repo_tags=_str_list(raw.get("repo_tags")),
+        )
+        apply_generalized_activation(config, raw, profile_path)
+        profiles[identifier] = config
+    return profiles
+
+
+def apply_generalized_activation(config: LayerConfig, raw: dict[str, Any], config_path: Path) -> None:
+    activation = raw.get("activation")
+    if activation is None:
+        return
+    if not isinstance(activation, dict):
+        raise ValidationError(f"[activation] must be a table in {config_path}")
+    unknown = set(activation) - {"required", "enabled", "disabled", "recommended"}
+    if unknown:
+        raise ValidationError(f"Unsupported activation fields in {config_path}: {', '.join(sorted(unknown))}")
+    for item_id in _str_list(activation.get("required")):
+        add_activation_id(config, item_id, "required", config_path)
+    for item_id in _str_list(activation.get("enabled")):
+        add_activation_id(config, item_id, "enabled", config_path)
+    for item_id in _str_list(activation.get("disabled")):
+        add_activation_id(config, item_id, "disabled", config_path)
+    for item_id in _str_list(activation.get("recommended")):
+        add_activation_id(config, item_id, "recommended", config_path)
+
+
+def add_activation_id(config: LayerConfig, item_id: str, mode: str, config_path: Path) -> None:
+    _, _, kind, _ = validate_canonical_id(item_id, path=config_path)
+    field_by_mode = {
+        "required": {
+            "policy": "baseline_policies",
+            "contract": "required_contracts",
+            "pack": "required_packs",
+        },
+        "enabled": {
+            "skill": "enabled_skills",
+            "policy": "optional_policies",
+            "doc": "docs",
+            "contract": "optional_contracts",
+            "pack": "enabled_packs",
+            "flow": "enabled_flows",
+            "profile": "enabled_profiles",
+        },
+        "disabled": {
+            "skill": "disabled_skills",
+            "policy": "disabled_optional_policies",
+            "doc": "disabled_docs",
+            "contract": "disabled_optional_contracts",
+            "pack": "disabled_packs",
+            "flow": "disabled_flows",
+            "profile": "disabled_profiles",
+        },
+        "recommended": {
+            "skill": "recommended_skills",
+            "policy": "recommended_policies",
+            "doc": "recommended_docs",
+            "contract": "recommended_contracts",
+            "pack": "recommended_packs",
+            "flow": "recommended_flows",
+            "profile": "recommended_profiles",
+        },
+    }
+    field = field_by_mode[mode].get(kind)
+    if field is None:
+        raise ValidationError(f"activation.{mode} does not support {kind} items in {config_path}: {item_id}")
+    values = getattr(config, field)
+    if item_id not in values:
+        values.append(item_id)
 
 
 def load_items(
@@ -144,6 +324,12 @@ def load_item(item_dir: Path, expected_kind: str, source_type: str, source_names
     privacy = str(raw.get("privacy", ""))
     if privacy not in VALID_PRIVACY:
         raise ValidationError(f"Invalid privacy {privacy!r} in {item_dir}")
+    activation_required, activation_enabled = parse_pack_item_activation(raw, kind, item_path)
+    source_note = raw.get("source_note")
+    trust_level = parse_trust_level(raw, source_type, source_note, item_path)
+    allows_scripts = bool(raw.get("allows_scripts", False))
+    if allows_scripts:
+        raise ValidationError(f"allows_scripts = true is not supported in v1: {item_path}")
     body_path = item_dir / "body.md"
     if not body_path.exists():
         raise ValidationError(f"Missing body.md for {item_id} at {item_dir}")
@@ -159,18 +345,144 @@ def load_item(item_dir: Path, expected_kind: str, source_type: str, source_names
         slug=parts[3],
         item_path=item_path,
         body_path=body_path,
+        owner=_optional_str(raw.get("owner")),
+        maintainer=_optional_str(raw.get("maintainer")),
+        lifecycle_status=parse_lifecycle_status(raw.get("status"), item_path),
+        review_status=parse_review_status(raw.get("review_status"), item_path),
+        deprecated_by=_optional_str(raw.get("deprecated_by")),
+        sunset_after=_optional_str(raw.get("sunset_after")),
+        autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), item_path),
+        requires_human_approval=_str_list(raw.get("requires_human_approval")),
+        stop_conditions=_str_list(raw.get("stop_conditions")),
+        escalation_contact=_optional_str(raw.get("escalation_contact")),
+        allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
+        requires_approval_for=_str_list(raw.get("requires_approval_for")),
+        forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
         tags=_str_list(raw.get("tags")),
         recommended_agent_types=_str_list(raw.get("recommended_agent_types")),
         timeout_seconds=_optional_int(raw.get("timeout_seconds")),
-        source_note=raw.get("source_note"),
+        source_note=source_note,
         target_tools=_str_list(raw.get("target_tools")),
         claude_model=raw.get("claude_model"),
         cursor_globs=_str_list(raw.get("cursor_globs")),
         cursor_always_apply=raw.get("cursor_always_apply"),
+        target_settings=parse_target_settings(raw.get("target", {}), item_path),
         policy_rules=list(raw.get("policy_rules", [])),
         usage_mode=str(raw.get("usage_mode", "reusable")),
+        activation_required=activation_required,
+        activation_enabled=activation_enabled,
+        promotion_checklist=parse_promotion_checklist(raw.get("promotion_checklist"), kind, item_path),
+        trust_level=trust_level,
+        trust_level_explicit="trust_level" in raw,
+        allows_scripts=allows_scripts,
+        reviewed_by=_optional_str(raw.get("reviewed_by")),
+        reviewed_at=_optional_str(raw.get("reviewed_at")),
+        applies_to_languages=_str_list(raw.get("applies_to_languages")),
+        applies_to_frameworks=_str_list(raw.get("applies_to_frameworks")),
+        compatible_versions=_str_dict(raw.get("compatible_versions")),
+        repo_tags=_str_list(raw.get("repo_tags")),
+        inputs=parse_flow_list(raw.get("inputs"), kind, "inputs", item_path),
+        outputs=parse_flow_list(raw.get("outputs"), kind, "outputs", item_path),
+        evidence_required=parse_evidence_required(raw.get("evidence_required"), kind, item_path),
     )
     return item
+
+
+def parse_trust_level(raw: dict[str, Any], source_type: str, source_note: Any, item_path: Path) -> str:
+    if "trust_level" in raw:
+        trust_level = str(raw["trust_level"])
+        if trust_level not in VALID_TRUST_LEVELS:
+            raise ValidationError(f"Invalid trust_level {trust_level!r} in {item_path}")
+        return trust_level
+    if source_type == "corp":
+        return "corp-reviewed"
+    if source_type == "user" and str(source_note or "").startswith("Imported from "):
+        return "unreviewed"
+    if source_type == "user":
+        return "user-trusted"
+    return "unreviewed"
+
+
+def parse_lifecycle_status(value: Any, item_path: Path) -> str:
+    status = str(value or "active")
+    if status not in VALID_LIFECYCLE_STATUSES:
+        raise ValidationError(f"Invalid status {status!r} in {item_path}")
+    return status
+
+
+def parse_review_status(value: Any, item_path: Path) -> str:
+    status = str(value or "unreviewed")
+    if status not in VALID_REVIEW_STATUSES:
+        raise ValidationError(f"Invalid review_status {status!r} in {item_path}")
+    return status
+
+
+def parse_autonomy_level(value: Any, item_path: Path) -> str:
+    level = str(value or "interactive")
+    if level not in VALID_AUTONOMY_LEVELS:
+        raise ValidationError(f"Invalid autonomy_level {level!r} in {item_path}")
+    return level
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def parse_promotion_checklist(value: Any, kind: str, item_path: Path) -> dict[str, str]:
+    if value is None:
+        return {}
+    if kind != "skill":
+        raise ValidationError(f"promotion_checklist is only supported for skill items: {item_path}")
+    if not isinstance(value, dict):
+        raise ValidationError(f"promotion_checklist must be a TOML table in {item_path}")
+    checklist: dict[str, str] = {}
+    for key, raw_value in value.items():
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            raise ValidationError(f"promotion_checklist.{key} must be a non-empty string in {item_path}")
+        checklist[str(key)] = raw_value.strip()
+    return checklist
+
+
+def parse_evidence_required(value: Any, kind: str, item_path: Path) -> list[str]:
+    if value is None:
+        return []
+    if kind not in {"contract", "flow"}:
+        raise ValidationError(f"evidence_required is only supported for contract and flow items: {item_path}")
+    return _str_list(value)
+
+
+def parse_flow_list(value: Any, kind: str, field_name: str, item_path: Path) -> list[str]:
+    if value is None:
+        return []
+    if kind != "flow":
+        raise ValidationError(f"{field_name} is only supported for flow items: {item_path}")
+    return _str_list(value)
+
+
+def parse_pack_item_activation(raw: dict[str, Any], kind: str, item_path: Path) -> tuple[list[str], list[str]]:
+    activation = raw.get("activation")
+    if activation is None:
+        return [], []
+    if kind != "pack":
+        raise ValidationError(f"[activation] in item.toml is only supported for pack items: {item_path}")
+    if not isinstance(activation, dict):
+        raise ValidationError(f"[activation] must be a table in {item_path}")
+    unknown = set(activation) - {"required", "enabled"}
+    if unknown:
+        raise ValidationError(f"Unsupported pack activation fields in {item_path}: {', '.join(sorted(unknown))}")
+    required = _str_list(activation.get("required"))
+    enabled = _str_list(activation.get("enabled"))
+    for mode, item_ids in [("required", required), ("enabled", enabled)]:
+        for item_id in item_ids:
+            _, _, ref_kind, _ = validate_canonical_id(item_id, path=item_path)
+            if ref_kind == "profile":
+                raise ValidationError(f"Pack activation.{mode} cannot reference profile items in {item_path}: {item_id}")
+            if mode == "required" and ref_kind not in {"policy", "contract", "pack"}:
+                raise ValidationError(f"Pack activation.required does not support {ref_kind} items in {item_path}: {item_id}")
+    return required, enabled
 
 
 def layer_root_ref(path: Path) -> str:
@@ -205,6 +517,7 @@ def load_claude_native_items(layer_root: Path, source_type: str, source_namespac
             target_tools=[str(tool) for tool in tools],
             claude_model=str(metadata["model"]) if metadata.get("model") else None,
             usage_mode=str(metadata.get("usage_mode", "reusable")),
+            trust_level=parse_trust_level({}, source_type, None, skill_md),
         )
     return items
 
@@ -273,6 +586,7 @@ def load_cursor_native_items(layer_root: Path, source_type: str, source_namespac
             cursor_always_apply=always_apply,
             source_note=description,
             usage_mode=str(metadata.get("usage_mode", "reusable")),
+            trust_level=parse_trust_level({}, source_type, description, path),
         )
     return items
 
@@ -298,10 +612,13 @@ def load_source_manifest(path: Path, source_type: str) -> SourceDefinition:
     source_id = str(raw["id"])
     commit = str(raw["commit"])
     namespace = str(raw["namespace"])
+    trust_level = _optional_str(raw.get("trust_level"))
     validate_source_id(source_id, path)
     validate_commit_hash(commit, path)
     if not namespace:
         raise ValidationError(f"Source namespace must be non-empty in {path}")
+    if trust_level is not None and trust_level not in VALID_TRUST_LEVELS:
+        raise ValidationError(f"Invalid trust_level {trust_level!r} in {path}")
     return SourceDefinition(
         source_id=source_id,
         url=str(raw["url"]),
@@ -311,6 +628,7 @@ def load_source_manifest(path: Path, source_type: str) -> SourceDefinition:
         fingerprint=raw.get("fingerprint"),
         path=path,
         source_type=source_type,
+        trust_level=trust_level,
     )
 
 
@@ -391,10 +709,41 @@ def parse_workspace_bindings(entries: Any, root: Path) -> list[WorkspaceBinding]
                 path=Path(str(entry["path"])).expanduser().resolve(),
                 repo_id=entry.get("repo_id"),
                 repo_group_id=entry.get("repo_group_id"),
+                profile=entry.get("profile"),
                 disabled_skills=_str_list(entry.get("disabled_skills")),
             )
         )
     return bindings
+
+
+def parse_target_settings(raw: Any, item_path: Path) -> dict[str, TargetSettings]:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValidationError(f"target settings must be a table in {item_path}")
+    result: dict[str, TargetSettings] = {}
+    for target, settings in raw.items():
+        if target not in {"claude", "codex", "cursor"}:
+            raise ValidationError(f"Unsupported target {target!r} in {item_path}")
+        if not isinstance(settings, dict):
+            raise ValidationError(f"target.{target} must be a table in {item_path}")
+        unknown = set(settings) - {"mode", "include", "summary_budget", "globs", "always_apply"}
+        if unknown:
+            raise ValidationError(f"Unsupported target.{target} fields in {item_path}: {', '.join(sorted(unknown))}")
+        include = settings.get("include", True)
+        if not isinstance(include, bool):
+            raise ValidationError(f"target.{target}.include must be a boolean in {item_path}")
+        always_apply = settings.get("always_apply")
+        if always_apply is not None and not isinstance(always_apply, bool):
+            raise ValidationError(f"target.{target}.always_apply must be a boolean in {item_path}")
+        result[target] = TargetSettings(
+            mode=str(settings["mode"]) if settings.get("mode") is not None else None,
+            include=include,
+            summary_budget=str(settings["summary_budget"]) if settings.get("summary_budget") is not None else None,
+            globs=_str_list(settings.get("globs")),
+            always_apply=always_apply,
+        )
+    return result
 
 
 def _str_list(value: Any) -> list[str]:
@@ -403,6 +752,21 @@ def _str_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         raise ValidationError(f"Expected list, got {type(value).__name__}")
     return [str(item) for item in value]
+
+
+def _str_dict(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValidationError(f"Expected table, got {type(value).__name__}")
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def _config_list(raw: dict[str, Any], section: str, key: str, flat_key: str) -> list[str]:
+    nested = raw.get(section)
+    if isinstance(nested, dict) and key in nested:
+        return _str_list(nested.get(key))
+    return _str_list(raw.get(flat_key))
 
 
 def _optional_int(value: Any) -> int | None:
@@ -424,6 +788,6 @@ def validate_layer_config(config: LayerConfig, config_path: Path) -> None:
             raise ValidationError(f"Repo config must declare normalized_remotes in {config_path}")
     elif config.layer_name == "user":
         if config.baseline_policies:
-            raise ValidationError(f"User override config may not declare baseline_policies in {config_path}")
+            raise ValidationError(f"User layer config may not declare baseline_policies in {config_path}")
         if config.repo_group_id or config.repo_class or config.normalized_remotes:
-            raise ValidationError(f"User override config may not declare repo binding fields in {config_path}")
+            raise ValidationError(f"User layer config may not declare repo binding fields in {config_path}")

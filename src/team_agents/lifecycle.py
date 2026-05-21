@@ -5,13 +5,13 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from team_agents.errors import TeamAgentsError, ValidationError
+from team_agents.errors import TeamAgentsError
 from team_agents.git_tools import find_git_root, run_git
 from team_agents.library import ensure_external_library_checkout, library_root, seed_library, seed_user_global_outputs
-from team_agents.loaders import load_corp_repo, load_user_overrides
-from team_agents.models import CorpRepo, MachineConfig, ResolutionResult, SourceRef, UserOverrides
+from team_agents.loaders import load_corp_repo, load_user_layer
+from team_agents.models import CorpRepo, MachineConfig, ResolutionResult, SourceRef, UserLayer
 from team_agents.output import write_sync_output
-from team_agents.resolution import resolve_workspace
+from team_agents.resolution import resolve_user_global, resolve_workspace
 from team_agents.sources import materialize_source
 
 
@@ -21,10 +21,6 @@ def recent_workspaces_path(machine_config: MachineConfig) -> Path:
 
 def update_log_path(machine_config: MachineConfig) -> Path:
     return machine_config.cache_root / "logs" / "update.json"
-
-
-def migration_report_dir(machine_config: MachineConfig) -> Path:
-    return machine_config.cache_root / "logs" / "migrations"
 
 
 def write_json(path: Path, payload: dict[str, object]) -> Path:
@@ -62,7 +58,7 @@ def _active_skill_items(result: ResolutionResult) -> list:
 def refresh_declared_sources(
     machine_config: MachineConfig,
     corp: CorpRepo,
-    user: UserOverrides,
+    user: UserLayer,
 ) -> dict[str, SourceRef]:
     source_details: dict[str, SourceRef] = {}
     for source_id, source in sorted(corp.sources.items()):
@@ -108,16 +104,16 @@ def gc_stale_external_checkouts(machine_config: MachineConfig, active_source_det
 def reseed(
     machine_config: MachineConfig,
     corp: CorpRepo,
-    user: UserOverrides,
+    user: UserLayer,
     *,
     workspaces: list[Path] | None = None,
     include_recent_workspaces: bool = True,
 ) -> dict[str, object]:
     root = seed_library(machine_config, user.root)
-    global_result = resolve_workspace(machine_config.cache_root.parent, machine_config, corp, user)
+    global_result = resolve_user_global(machine_config, corp, user)
     active_sources = dict(global_result.source_details)
     for source_ref in global_result.source_details.values():
-        ensure_external_library_checkout(root, source_ref)
+        ensure_external_library_checkout(root, source_ref, strategy=machine_config.materialization_strategy)
     user_global_written = seed_user_global_outputs(machine_config, user.root, _active_skill_items(global_result))
 
     workspace_paths: list[Path] = []
@@ -145,7 +141,7 @@ def reseed(
             }
         )
         for source_ref in result.source_details.values():
-            ensure_external_library_checkout(root, source_ref)
+            ensure_external_library_checkout(root, source_ref, strategy=machine_config.materialization_strategy)
 
     stale = gc_stale_external_checkouts(machine_config, active_sources)
     return {
@@ -173,7 +169,7 @@ def run_update(machine_config: MachineConfig) -> dict[str, object]:
     after_commit = run_git(["rev-parse", "HEAD"], cwd=corp_root)
 
     corp = load_corp_repo(corp_root)
-    user = load_user_overrides(machine_config.user_override_path)
+    user = load_user_layer(machine_config.user_layer_path)
     refreshed_sources = refresh_declared_sources(machine_config, corp, user)
     reseed_summary = reseed(machine_config, corp, user, include_recent_workspaces=True)
     payload = {
@@ -195,77 +191,3 @@ def run_update(machine_config: MachineConfig) -> dict[str, object]:
     }
     write_json(update_log_path(machine_config), payload)
     return payload
-
-
-def migrate_user_overrides(
-    *,
-    legacy_root: Path,
-    corp_root: Path,
-    user_name: str,
-    cache_root: Path,
-) -> dict[str, object]:
-    legacy_root = legacy_root.expanduser().resolve()
-    target_root = (corp_root / "users" / user_name).resolve()
-    report = {
-        "legacy_root": str(legacy_root),
-        "target_root": str(target_root),
-        "moved": [],
-        "skipped": [],
-        "conflicting": [],
-    }
-    target_root.mkdir(parents=True, exist_ok=True)
-    for relative_name in ["skills", "policies", "docs", "sources", "workspaces", "config.toml"]:
-        source_path = legacy_root / relative_name
-        target_path = target_root / relative_name
-        if not source_path.exists():
-            if target_path.exists():
-                skipped = report["skipped"]
-                if isinstance(skipped, list):
-                    skipped.append(str(target_path))
-            continue
-        if source_path.is_file():
-            _migrate_file(source_path, target_path, report)
-            continue
-        for file_path in sorted(path for path in source_path.rglob("*") if path.is_file()):
-            relative = file_path.relative_to(legacy_root)
-            _migrate_file(file_path, target_root / relative, report)
-    _cleanup_empty_dirs(legacy_root)
-    machine_config = MachineConfig(
-        corp_repo_path=corp_root,
-        user_override_path=target_root,
-        cache_root=cache_root,
-        default_tool_target="all",
-        user_name=user_name,
-    )
-    report["report_path"] = str(
-        write_json(
-            migration_report_dir(machine_config) / f"migrate-user-overrides-{user_name}.json",
-            report,
-        )
-    )
-    return report
-
-
-def _migrate_file(source_path: Path, target_path: Path, report: dict[str, object]) -> None:
-    moved = report["moved"]
-    skipped = report["skipped"]
-    conflicting = report["conflicting"]
-    if not isinstance(moved, list) or not isinstance(skipped, list) or not isinstance(conflicting, list):
-        raise ValidationError("Invalid migration report state")
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    if not target_path.exists():
-        shutil.move(str(source_path), str(target_path))
-        moved.append(str(target_path))
-        return
-    if target_path.read_bytes() == source_path.read_bytes():
-        skipped.append(str(target_path))
-        return
-    conflicting.append(str(target_path))
-
-
-def _cleanup_empty_dirs(root: Path) -> None:
-    if not root.exists():
-        return
-    for directory in sorted((path for path in root.rglob("*") if path.is_dir()), reverse=True):
-        if not any(directory.iterdir()):
-            directory.rmdir()

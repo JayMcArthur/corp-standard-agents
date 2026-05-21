@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 
 from team_agents.errors import ValidationError
+from team_agents.emitters.claude import render_skill_markdown
 from team_agents.frontmatter import parse_frontmatter_document
 from team_agents.library import render_codex_section, render_cursor_rule
 from team_agents.loaders import load_item, load_items
-from team_agents.output import render_skill_markdown
 
 
 def write(path: Path, content: str) -> None:

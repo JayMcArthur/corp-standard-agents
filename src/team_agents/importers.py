@@ -17,6 +17,7 @@ def import_folder_skills(
     include_system: bool = False,
     privacy: str = "repo-safe",
     replace_existing: bool = True,
+    auto_enable_imported: bool = True,
 ) -> dict[str, int]:
     source_root = source_root.resolve()
     layer_root = layer_root.resolve()
@@ -87,7 +88,10 @@ def import_folder_skills(
                 body += f"- `{doc_id}` from `{relative.as_posix()}`\n"
         target.joinpath("body.md").write_text(body, encoding="utf-8")
 
-    existing["enabled_skills"] = sorted(set(existing_enabled).union(enabled_skills))
+    if auto_enable_imported:
+        existing["enabled_skills"] = sorted(set(existing_enabled).union(enabled_skills))
+    else:
+        existing["enabled_skills"] = sorted(set(existing_enabled))
     _ensure_layer_defaults(existing)
     write_toml_document(config_path, existing)
     for name in ["policies", "sources", "workspaces"]:
@@ -103,6 +107,7 @@ def import_codex_skills(
     include_system: bool = False,
     privacy: str = "repo-safe",
     replace_existing: bool = True,
+    auto_enable_imported: bool = True,
 ) -> dict[str, int]:
     return import_folder_skills(
         source_root=source_root,
@@ -112,6 +117,7 @@ def import_codex_skills(
         include_system=include_system,
         privacy=privacy,
         replace_existing=replace_existing,
+        auto_enable_imported=auto_enable_imported,
     )
 
 

@@ -21,7 +21,10 @@ class ItemTomlContractTests(unittest.TestCase):
         self.assertTrue(ITEM_TOML_V1_SCHEMA_PATH.exists())
         schema = load_item_toml_schema()
         self.assertEqual(schema["required"], ["id", "kind", "title", "privacy"])
-        self.assertEqual(schema["properties"]["kind"]["enum"], ["skill", "policy", "doc"])
+        self.assertEqual(
+            schema["properties"]["kind"]["enum"],
+            ["skill", "policy", "doc", "contract", "flow", "pack", "profile"],
+        )
 
     def test_existing_item_toml_fixtures_validate(self) -> None:
         item_paths = sorted((ROOT / "examples").rglob("item.toml")) + sorted((ROOT / ".agents").rglob("item.toml"))

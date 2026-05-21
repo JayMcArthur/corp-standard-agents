@@ -4,8 +4,18 @@ import shutil
 from pathlib import Path
 
 from team_agents.errors import ValidationError
-from team_agents.toml_utils import read_toml, write_simple_toml, write_toml_document
+from team_agents.toml_utils import read_toml, write_toml_document
 from team_agents.validation import validate_canonical_id
+
+
+PROMOTION_CHECKLIST_FIELDS = {
+    "task",
+    "applicability",
+    "evidence",
+    "risks",
+    "scope",
+    "redundancy",
+}
 
 
 def promote_skills(
@@ -75,6 +85,35 @@ def promote_skills(
     return promoted
 
 
+def promotion_checklist_warnings(
+    corp_root: Path,
+    user_root: Path,
+    from_layer: str,
+    skill_ids: list[str],
+    from_repo_id: str | None = None,
+    all_imported: bool = False,
+) -> list[str]:
+    source_root, _source_type, _source_namespace = resolve_layer_target(corp_root, user_root, from_layer, from_repo_id)
+    selected_ids = resolve_selected_skill_ids(source_root, skill_ids, all_imported)
+    warnings: list[str] = []
+    for skill_id in selected_ids:
+        _, _, _, slug = validate_canonical_id(skill_id, expected_kind="skill", path=source_root / "config.toml")
+        item_path = source_root / "skills" / slug / "item.toml"
+        item = read_toml(item_path)
+        checklist = item.get("promotion_checklist")
+        if not isinstance(checklist, dict):
+            warnings.append(f"{skill_id}: missing promotion_checklist")
+            continue
+        missing = sorted(
+            field
+            for field in PROMOTION_CHECKLIST_FIELDS
+            if not isinstance(checklist.get(field), str) or not str(checklist.get(field)).strip()
+        )
+        if missing:
+            warnings.append(f"{skill_id}: missing promotion_checklist fields: {', '.join(missing)}")
+    return warnings
+
+
 def resolve_selected_skill_ids(source_root: Path, skill_ids: list[str], all_imported: bool) -> list[str]:
     if all_imported:
         resolved: list[str] = []
@@ -123,7 +162,7 @@ def collect_related_docs(source_root: Path, source_type: str, source_namespace: 
 def rewrite_item_id(item_path: Path, new_item_id: str) -> None:
     data = read_toml(item_path)
     data["id"] = new_item_id
-    write_simple_toml(item_path, data)
+    write_toml_document(item_path, data)
 
 
 def rewrite_body_references(body_path: Path, replacements: dict[str, str]) -> None:

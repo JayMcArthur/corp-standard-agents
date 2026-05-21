@@ -50,6 +50,5 @@ The canonical machine-readable schema lives at [src/team_agents/schemas/item-tom
 
 ## Notes
 
-- This freeze reflects the current PRD direction: one item shape that can carry baseline metadata plus reserved tool-specific metadata.
+- This contract defines one item shape that can carry baseline metadata plus reserved tool-specific metadata.
 - The current repo has fixture `item.toml` files under `examples/` and no native `item.toml` fixtures under `.agents/`; contract tests validate both locations.
-- Human sign-off on this frozen contract is still required in the issue tracker.

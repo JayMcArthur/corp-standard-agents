@@ -1,5 +1,5 @@
 id = "internal-app"
-normalized_remotes = ["git.example.test/demo/internal-app"]
+normalized_remotes = ["__INTERNAL_APP_REMOTE__"]
 repo_group_id = "platform"
 repo_class = "internal"
 enabled_skills = [

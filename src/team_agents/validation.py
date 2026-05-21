@@ -7,7 +7,7 @@ from team_agents.errors import ValidationError
 
 
 CANONICAL_ID_RE = re.compile(
-    r"^(corp|external|user)\.([a-z0-9][a-z0-9_-]*)\.(skill|policy|doc)\.([a-z0-9][a-z0-9_-]*)$"
+    r"^(corp|external|user)\.([a-z0-9][a-z0-9_-]*)\.(skill|policy|doc|contract|flow|pack|profile)\.([a-z0-9][a-z0-9_-]*)$"
 )
 SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
@@ -41,4 +41,3 @@ def validate_repo_class(repo_class: str | None, path: Path) -> None:
         return
     if repo_class not in REPO_CLASS_VALUES:
         raise ValidationError(f"Invalid repo_class {repo_class!r} in {path}; expected one of {sorted(REPO_CLASS_VALUES)}")
-

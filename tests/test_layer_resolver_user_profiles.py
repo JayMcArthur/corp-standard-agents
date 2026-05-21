@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from team_agents.cli import main
-from team_agents.loaders import load_corp_repo, load_user_overrides
+from team_agents.loaders import load_corp_repo, load_user_layer
 from team_agents.machine import load_machine_config
 from team_agents.resolution import resolve_workspace
 
@@ -78,7 +78,7 @@ class LayerResolverUserProfilesTests(unittest.TestCase):
         self.assertEqual(main(["setup", "--corp-repo", str(self.corp), "--user", "alice"]), 0)
         machine = load_machine_config()
         corp = load_corp_repo(machine.corp_repo_path)
-        user = load_user_overrides(machine.user_override_path)
+        user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.workspace, machine, corp, user)
         self.assertIn("user.alice.skill.reviewer", result.enabled_skills)
         self.assertEqual(result.to_dict()["items"]["user.alice.skill.reviewer"]["activated_by"], ["user:alice"])

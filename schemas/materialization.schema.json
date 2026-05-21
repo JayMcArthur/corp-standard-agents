@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://team-agents.local/schemas/v1/materialization.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "strategy": {
+      "type": "string",
+      "enum": ["auto", "copy", "symlink", "junction", "hardlink", "render-only"]
+    }
+  }
+}

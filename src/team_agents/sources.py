@@ -62,4 +62,6 @@ def load_source_items(source: SourceDefinition, source_ref: SourceRef) -> dict[s
     for item in items.values():
         item.source_namespace = source.namespace
         item.source_ref = source.commit
+        if source.trust_level is not None and not item.trust_level_explicit:
+            item.trust_level = source.trust_level
     return items

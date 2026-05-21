@@ -50,7 +50,13 @@ def write_toml_document(path: Path, values: dict[str, Any]) -> None:
                 table_lines.append("")
             continue
         if isinstance(value, dict):
-            raise ValueError(f"Nested TOML tables are not supported for key {key}")
+            table_lines.append(f"[{key}]")
+            for item_key, item_value in value.items():
+                if isinstance(item_value, dict):
+                    raise ValueError(f"Nested TOML tables are not supported for key {key}.{item_key}")
+                table_lines.append(f"{item_key} = {_toml_value(item_value)}")
+            table_lines.append("")
+            continue
         lines.append(f"{key} = {_toml_value(value)}")
     if table_lines:
         if lines:

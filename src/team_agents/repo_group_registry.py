@@ -15,6 +15,8 @@ def register_repo_group(
     disabled_skills: list[str] | None = None,
     enabled_sources: list[str] | None = None,
     disabled_sources: list[str] | None = None,
+    optional_policies: list[str] | None = None,
+    disabled_optional_policies: list[str] | None = None,
     docs: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
@@ -32,6 +34,8 @@ def register_repo_group(
             disabled_skills=disabled_skills,
             enabled_sources=enabled_sources,
             disabled_sources=disabled_sources,
+            optional_policies=optional_policies,
+            disabled_optional_policies=disabled_optional_policies,
             docs=docs,
             recommended_agent_types=recommended_agent_types,
         ),
@@ -47,6 +51,8 @@ def update_repo_group_config(
     disabled_skills: list[str] | None = None,
     enabled_sources: list[str] | None = None,
     disabled_sources: list[str] | None = None,
+    optional_policies: list[str] | None = None,
+    disabled_optional_policies: list[str] | None = None,
     docs: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
@@ -59,6 +65,10 @@ def update_repo_group_config(
         data["enabled_sources"] = enabled_sources
     if disabled_sources is not None:
         data["disabled_sources"] = disabled_sources
+    if optional_policies is not None:
+        data["optional_policies"] = optional_policies
+    if disabled_optional_policies is not None:
+        data["disabled_optional_policies"] = disabled_optional_policies
     if docs is not None:
         data["docs"] = docs
     if recommended_agent_types is not None:
@@ -97,6 +107,8 @@ def _repo_group_config_payload(
     disabled_skills: list[str] | None,
     enabled_sources: list[str] | None,
     disabled_sources: list[str] | None,
+    optional_policies: list[str] | None,
+    disabled_optional_policies: list[str] | None,
     docs: list[str] | None,
     recommended_agent_types: list[str] | None,
 ) -> dict[str, object]:
@@ -109,6 +121,10 @@ def _repo_group_config_payload(
         payload["enabled_sources"] = enabled_sources
     if disabled_sources:
         payload["disabled_sources"] = disabled_sources
+    if optional_policies:
+        payload["optional_policies"] = optional_policies
+    if disabled_optional_policies:
+        payload["disabled_optional_policies"] = disabled_optional_policies
     if docs:
         payload["docs"] = docs
     if recommended_agent_types:

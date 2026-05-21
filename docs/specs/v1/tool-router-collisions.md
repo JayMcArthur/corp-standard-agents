@@ -50,4 +50,4 @@ Frozen diagnostic shapes:
 ## Notes
 
 - The collision contract is path-sensitive; `.cursor/rules/team-agents.mdc` is treated as a first-class router target, not a generic doc file.
-- Human sign-off on this frozen contract is still required in the issue tracker.
+- This contract is maintained as public reference documentation.
