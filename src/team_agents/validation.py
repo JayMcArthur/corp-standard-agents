@@ -7,7 +7,7 @@ from team_agents.errors import ValidationError
 
 
 CANONICAL_ID_RE = re.compile(
-    r"^(corp|external|user)\.([a-z0-9][a-z0-9_-]*)\.(skill|policy|doc|contract|flow|pack|profile)\.([a-z0-9][a-z0-9_-]*)$"
+    r"^(corp|external|user)\.([a-z0-9][a-z0-9_-]*)\.(skill|policy|context|completion_gate|playbook|pack|profile)\.([a-z0-9][a-z0-9_-]*)$"
 )
 SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")

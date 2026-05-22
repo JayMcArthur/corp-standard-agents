@@ -19,7 +19,7 @@ def init_corp_repo(dest: Path) -> None:
 
         Layout:
 
-        - `org/`: org-wide defaults, starter docs, policies, contracts, skills, flows, packs, and profiles
+        - `org/`: org-wide defaults, starter contexts, policies, completion gates, skills, playbooks, packs, and profiles
         - `repo-groups/`: shared standards for groups of repos
         - `repos/`: per-repo standards and activation
         - `users/`: optional corp-managed user profiles under `users/<username>/`
@@ -35,7 +35,7 @@ def init_corp_repo(dest: Path) -> None:
         enabled_sources = []
         enabled_skills = ["corp.example-org.skill.recursive-planning"]
         baseline_policies = ["corp.example-org.policy.no-leaks"]
-        required_contracts = ["corp.example-org.contract.definition-of-done"]
+        required_completion_gates = ["corp.example-org.completion_gate.definition-of-done"]
         allowed_profiles = ["coder", "reviewer"]
         default_profile = "coder"
         recommended_agent_types = ["shell"]
@@ -106,10 +106,10 @@ def init_corp_repo(dest: Path) -> None:
     )
     _write(dest / "org" / "policies" / "no-leaks" / "body.md", "Generated corp-private context must never be committed to client repos.")
     _write(
-        dest / "org" / "contracts" / "definition-of-done" / "item.toml",
+        dest / "org" / "completion_gates" / "definition-of-done" / "item.toml",
         """
-        id = "corp.example-org.contract.definition-of-done"
-        kind = "contract"
+        id = "corp.example-org.completion_gate.definition-of-done"
+        kind = "completion_gate"
         title = "Definition Of Done"
         privacy = "repo-safe"
         evidence_required = [
@@ -121,7 +121,7 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "contracts" / "definition-of-done" / "body.md",
+        dest / "org" / "completion_gates" / "definition-of-done" / "body.md",
         """
         # Definition Of Done
 
@@ -129,17 +129,17 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "docs" / "authoring-example" / "item.toml",
+        dest / "org" / "contexts" / "authoring-example" / "item.toml",
         """
-        # Doc items use the same schema as skills and policies.
-        id = "corp.example-org.doc.authoring-example"
-        kind = "doc"
+        # Context items use the same schema as skills and policies.
+        id = "corp.example-org.context.authoring-example"
+        kind = "context"
         title = "Authoring Example"
         privacy = "repo-safe"
         """,
     )
     _write(
-        dest / "org" / "docs" / "authoring-example" / "body.md",
+        dest / "org" / "contexts" / "authoring-example" / "body.md",
         """
         # Authoring Example
 
@@ -147,10 +147,10 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "coder-loop" / "item.toml",
+        dest / "org" / "playbooks" / "coder-loop" / "item.toml",
         """
-        id = "corp.example-org.flow.coder-loop"
-        kind = "flow"
+        id = "corp.example-org.playbook.coder-loop"
+        kind = "playbook"
         title = "Coder Loop"
         privacy = "repo-safe"
         inputs = ["task_request", "repo_context"]
@@ -160,7 +160,7 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "coder-loop" / "body.md",
+        dest / "org" / "playbooks" / "coder-loop" / "body.md",
         """
         # Coder Loop
 
@@ -168,10 +168,10 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "pr-review" / "item.toml",
+        dest / "org" / "playbooks" / "pr-review" / "item.toml",
         """
-        id = "corp.example-org.flow.pr-review"
-        kind = "flow"
+        id = "corp.example-org.playbook.pr-review"
+        kind = "playbook"
         title = "PR Review"
         privacy = "repo-safe"
         inputs = ["diff", "repo_context"]
@@ -181,7 +181,7 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "pr-review" / "body.md",
+        dest / "org" / "playbooks" / "pr-review" / "body.md",
         """
         # PR Review
 
@@ -189,10 +189,10 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "prep-before-code" / "item.toml",
+        dest / "org" / "playbooks" / "prep-before-code" / "item.toml",
         """
-        id = "corp.example-org.flow.prep-before-code"
-        kind = "flow"
+        id = "corp.example-org.playbook.prep-before-code"
+        kind = "playbook"
         title = "Prep Before Code"
         privacy = "repo-safe"
         tags = ["prep", "mise-en-place", "large-task"]
@@ -203,7 +203,7 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "flows" / "prep-before-code" / "body.md",
+        dest / "org" / "playbooks" / "prep-before-code" / "body.md",
         """
         # Prep Before Code
 
@@ -224,10 +224,10 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "contracts" / "prep-artifacts" / "item.toml",
+        dest / "org" / "completion_gates" / "prep-artifacts" / "item.toml",
         """
-        id = "corp.example-org.contract.prep-artifacts"
-        kind = "contract"
+        id = "corp.example-org.completion_gate.prep-artifacts"
+        kind = "completion_gate"
         title = "Prep Artifacts"
         privacy = "repo-safe"
         evidence_required = [
@@ -240,7 +240,7 @@ def init_corp_repo(dest: Path) -> None:
         """,
     )
     _write(
-        dest / "org" / "contracts" / "prep-artifacts" / "body.md",
+        dest / "org" / "completion_gates" / "prep-artifacts" / "body.md",
         """
         # Prep Artifacts
 
@@ -258,21 +258,15 @@ def init_corp_repo(dest: Path) -> None:
         maintainer = "agent-platform"
         status = "active"
         review_status = "approved"
-        autonomy_level = "interactive"
-        requires_human_approval = ["deploy", "external_send", "file_delete"]
         stop_conditions = ["secrets_detected", "tests_fail_after_two_attempts", "unclear_requirement"]
-        escalation_contact = "agent-platform"
-        allowed_tool_classes = ["read", "edit", "test"]
-        requires_approval_for = ["shell", "network", "secrets", "deploy"]
-        forbidden_tool_classes = ["email-send", "payment", "prod-write"]
 
         [activation]
         required = [
           "corp.example-org.policy.no-leaks",
-          "corp.example-org.contract.definition-of-done"
+          "corp.example-org.completion_gate.definition-of-done"
         ]
         enabled = [
-          "corp.example-org.doc.authoring-example",
+          "corp.example-org.context.authoring-example",
           "corp.example-org.skill.recursive-planning"
         ]
         """,
@@ -294,8 +288,8 @@ def init_corp_repo(dest: Path) -> None:
         privacy = "repo-safe"
 
         [activation]
-        required = ["corp.example-org.contract.prep-artifacts"]
-        enabled = ["corp.example-org.flow.prep-before-code"]
+        required = ["corp.example-org.completion_gate.prep-artifacts"]
+        enabled = ["corp.example-org.playbook.prep-before-code"]
         """,
     )
     _write(
@@ -315,19 +309,13 @@ def init_corp_repo(dest: Path) -> None:
         maintainer = "agent-platform"
         status = "active"
         review_status = "approved"
-        autonomy_level = "interactive"
-        requires_human_approval = ["approval", "external_send"]
         stop_conditions = ["secrets_detected", "unclear_requirement"]
-        escalation_contact = "agent-platform"
-        allowed_tool_classes = ["read", "test"]
-        requires_approval_for = ["shell", "network", "secrets"]
-        forbidden_tool_classes = ["email-send", "payment", "prod-write"]
 
         [activation]
         enabled = [
           "corp.example-org.pack.corp-baseline",
           "corp.example-org.pack.preparation",
-          "corp.example-org.flow.coder-loop"
+          "corp.example-org.playbook.coder-loop"
         ]
         """,
     )
@@ -342,11 +330,11 @@ def init_corp_repo(dest: Path) -> None:
         review_status = "approved"
 
         [activation]
-        required = ["corp.example-org.contract.definition-of-done"]
+        required = ["corp.example-org.completion_gate.definition-of-done"]
         enabled = [
           "corp.example-org.pack.corp-baseline",
           "corp.example-org.pack.preparation",
-          "corp.example-org.flow.pr-review"
+          "corp.example-org.playbook.pr-review"
         ]
         """,
     )
@@ -367,21 +355,21 @@ def init_corp_repo(dest: Path) -> None:
         normalized_remotes = ["git.example.test/example/example-repo"]
         repo_class = "internal"
         enabled_skills = ["corp.example-org.skill.recursive-planning"]
-        required_contracts = ["corp.example-org.contract.repo-bootstrap"]
+        required_completion_gates = ["corp.example-org.completion_gate.repo-bootstrap"]
         """,
     )
     _write(
-        dest / "repos" / "example-repo" / "contracts" / "repo-bootstrap" / "item.toml",
+        dest / "repos" / "example-repo" / "completion_gates" / "repo-bootstrap" / "item.toml",
         """
-        id = "corp.example-org.contract.repo-bootstrap"
-        kind = "contract"
+        id = "corp.example-org.completion_gate.repo-bootstrap"
+        kind = "completion_gate"
         title = "Repo Bootstrap"
         privacy = "repo-safe"
         tags = ["bootstrap", "minimal-verification"]
         """,
     )
     _write(
-        dest / "repos" / "example-repo" / "contracts" / "repo-bootstrap" / "body.md",
+        dest / "repos" / "example-repo" / "completion_gates" / "repo-bootstrap" / "body.md",
         """
         # Repo Bootstrap
 
@@ -431,7 +419,7 @@ def init_corp_repo(dest: Path) -> None:
         This folder is only for companies that explicitly want corp-managed user profiles:
 
         - `config.toml` for user-level activations and workspace bindings
-        - `docs/`, `policies/`, `contracts/`, `skills/`, `flows/`, `packs/`, `profiles/`, and `sources/`
+        - `contexts/`, `policies/`, `completion_gates/`, `skills/`, `playbooks/`, `packs/`, `profiles/`, and `sources/`
 
         `team-agents setup --corp-repo <path> --user <username>` creates this explicit corp-managed folder if it does not exist yet.
         """,
@@ -447,9 +435,9 @@ def init_user_layer(dest: Path) -> None:
 
         This folder stores personal team-agents context and workspace bindings for this machine.
 
-        Local user layers may add personal docs, policies, contracts, skills, flows, packs, profiles, and sources. They must not weaken required corp, repo, or profile standards.
+        Local user layers may add personal contexts, policies, completion gates, skills, playbooks, packs, profiles, and sources. They must not weaken required corp, repo, or profile standards.
 
-        Daily workspace flow:
+        Daily workspace playbook:
 
         ```bash
         team-agents attach --workspace /path/to/workspace
@@ -479,8 +467,8 @@ def init_user_layer(dest: Path) -> None:
         disabled_skills = []
         optional_policies = []
         disabled_optional_policies = []
-        docs = []
-        disabled_docs = []
+        contexts = []
+        disabled_contexts = []
         preferred_agent_types = ["local-helper"]
         """,
     )
@@ -501,7 +489,7 @@ def init_user_layer(dest: Path) -> None:
         Replace this with your personal shell helper skill.
         """,
     )
-    for name in ["policies", "docs", "contracts", "flows", "packs", "profiles", "activations", "sources", "workspaces"]:
+    for name in ["policies", "contexts", "completion_gates", "playbooks", "packs", "profiles", "activations", "sources", "workspaces"]:
         (dest / name).mkdir(parents=True, exist_ok=True)
 
 
@@ -517,10 +505,10 @@ def init_user_profile(dest: Path, username: str) -> None:
         disabled_skills = []
         optional_policies = []
         disabled_optional_policies = []
-        docs = []
-        disabled_docs = []
+        contexts = []
+        disabled_contexts = []
         preferred_agent_types = []
         """,
     )
-    for name in ["skills", "policies", "docs", "contracts", "flows", "packs", "profiles", "activations", "sources", "workspaces"]:
+    for name in ["skills", "policies", "contexts", "completion_gates", "playbooks", "packs", "profiles", "activations", "sources", "workspaces"]:
         (dest / name).mkdir(parents=True, exist_ok=True)

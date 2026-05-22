@@ -14,9 +14,9 @@ Harnesses prepare and supervise model work. They can consume `team-agents` stand
 
 - `team-agents context --workspace <path> --for-harness --json`
 - `.agents/resolution.json`
-- active contracts and evidence requirements
-- active flows as playbooks
-- selected profile/job permission notes and stop conditions
+- active completion gates and evidence requirements
+- active playbooks
+- selected profile/job stop conditions
 
 ## Example Commands And Artifacts
 

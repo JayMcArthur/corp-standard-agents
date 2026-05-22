@@ -223,15 +223,15 @@ def create_corp_repo(
     )
     write(corp / "org" / "policies" / "no-leaks" / "body.md", "Do not leak private corp process.")
     write(
-        corp / "org" / "docs" / "internal-runbook" / "item.toml",
+        corp / "org" / "contexts" / "internal-runbook" / "item.toml",
         """
-        id = "corp.shadowknight.doc.internal-runbook"
-        kind = "doc"
+        id = "corp.shadowknight.context.internal-runbook"
+        kind = "context"
         title = "Internal Runbook"
         privacy = "corp-private"
         """,
     )
-    write(corp / "org" / "docs" / "internal-runbook" / "body.md", "Internal runbook body")
+    write(corp / "org" / "contexts" / "internal-runbook" / "body.md", "Internal runbook body")
     write(
         corp / "org" / "sources" / "shared-ext.toml",
         f"""
@@ -247,7 +247,7 @@ def create_corp_repo(
         """
         id = "platform"
         enabled_skills = ["corp.shadowknight.skill.platform-shared"]
-        docs = ["corp.shadowknight.doc.platform-map"]
+        contexts = ["corp.shadowknight.context.platform-map"]
         recommended_agent_types = ["planner"]
         """,
     )
@@ -262,15 +262,15 @@ def create_corp_repo(
     )
     write(corp / "repo-groups" / "platform" / "skills" / "platform-shared" / "body.md", "Platform shared body")
     write(
-        corp / "repo-groups" / "platform" / "docs" / "platform-map" / "item.toml",
+        corp / "repo-groups" / "platform" / "contexts" / "platform-map" / "item.toml",
         """
-        id = "corp.shadowknight.doc.platform-map"
-        kind = "doc"
+        id = "corp.shadowknight.context.platform-map"
+        kind = "context"
         title = "Platform Map"
         privacy = "repo-safe"
         """,
     )
-    write(corp / "repo-groups" / "platform" / "docs" / "platform-map" / "body.md", "Platform map body")
+    write(corp / "repo-groups" / "platform" / "contexts" / "platform-map" / "body.md", "Platform map body")
     write(
         corp / "repos" / "internal-app" / "config.toml",
         f"""
@@ -284,7 +284,7 @@ def create_corp_repo(
           "corp.shadowknight.skill.internal-ops"
         ]
         optional_policies = ["external.shared.policy.ext-policy"]
-        docs = ["corp.shadowknight.doc.internal-runbook"]
+        contexts = ["corp.shadowknight.context.internal-runbook"]
 
         [[item_override]]
         id = "external.shared.skill.ext-lint"
@@ -522,34 +522,29 @@ class TeamAgentsTests(unittest.TestCase):
             self.corp_repo / "org" / "profiles" / "runner.toml",
             """
             id = "runner"
-            autonomy_level = "background"
-            requires_human_approval = ["deploy"]
             stop_conditions = ["secrets_detected"]
-            allowed_tool_classes = ["read", "edit", "test"]
-            requires_approval_for = ["network"]
-            forbidden_tool_classes = ["payment"]
 
             [activation]
-            required = ["corp.shadowknight.contract.definition-of-done"]
-            enabled = ["corp.shadowknight.flow.prep-before-code"]
+            required = ["corp.shadowknight.completion_gate.definition-of-done"]
+            enabled = ["corp.shadowknight.playbook.prep-before-code"]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.definition-of-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.definition-of-done"
+            kind = "completion_gate"
             title = "Definition Of Done"
             privacy = "repo-safe"
             evidence_required = ["tests_run", "risk_notes"]
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Show evidence before done.")
+        write(self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "body.md", "Show evidence before done.")
         write(
-            self.corp_repo / "org" / "flows" / "prep-before-code" / "item.toml",
+            self.corp_repo / "org" / "playbooks" / "prep-before-code" / "item.toml",
             """
-            id = "corp.shadowknight.flow.prep-before-code"
-            kind = "flow"
+            id = "corp.shadowknight.playbook.prep-before-code"
+            kind = "playbook"
             title = "Prep Before Code"
             privacy = "repo-safe"
             inputs = ["task_request", "repo_context"]
@@ -558,7 +553,7 @@ class TeamAgentsTests(unittest.TestCase):
             stop_conditions = ["ambiguous_requirement"]
             """,
         )
-        write(self.corp_repo / "org" / "flows" / "prep-before-code" / "body.md", "Plan before implementation.")
+        write(self.corp_repo / "org" / "playbooks" / "prep-before-code" / "body.md", "Plan before implementation.")
         write(
             self.corp_repo / "org" / "config.toml",
             """
@@ -583,92 +578,13 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(payload["kind"], "harness-context")
         self.assertIn("no task runner", payload["non_goals"])
         self.assertEqual(payload["workspace"]["profile"], "runner")
-        self.assertIn("corp.shadowknight.contract.definition-of-done", payload["required_contracts"])
-        self.assertIn("corp.shadowknight.contract.definition-of-done", payload["evidence_requirements"])
-        self.assertIn("corp.shadowknight.flow.prep-before-code", payload["active_flows"])
-        profile_permissions = payload["tool_permissions"]["profiles"][0]
-        self.assertEqual(profile_permissions["autonomy_level"], "background")
-        self.assertEqual(profile_permissions["allowed_tool_classes"], ["read", "edit", "test"])
-        self.assertEqual(profile_permissions["requires_approval_for"], ["network"])
-        self.assertEqual(profile_permissions["forbidden_tool_classes"], ["payment"])
+        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", payload["required_completion_gates"])
+        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", payload["evidence_requirements"])
+        self.assertIn("corp.shadowknight.playbook.prep-before-code", payload["active_playbooks"])
+        profile_stop_conditions = payload["stop_condition_sources"]["profiles"][0]
+        self.assertEqual(profile_stop_conditions["profile"], "runner")
+        self.assertEqual(profile_stop_conditions["stop_conditions"], ["secrets_detected"])
         self.assertIn("secrets_detected", payload["stop_conditions"])
-
-    def test_context_for_agent_os_outputs_boundary_without_runtime_state(self) -> None:
-        write(
-            self.corp_repo / "org" / "profiles" / "planner.toml",
-            """
-            id = "planner"
-            autonomy_level = "interactive"
-            stop_conditions = ["unclear_task"]
-
-            [activation]
-            required = ["corp.shadowknight.contract.agent-os-done"]
-            enabled = ["corp.shadowknight.flow.agent-os-prep"]
-            """,
-        )
-        write(
-            self.corp_repo / "org" / "contracts" / "agent-os-done" / "item.toml",
-            """
-            id = "corp.shadowknight.contract.agent-os-done"
-            kind = "contract"
-            title = "Agent OS Done"
-            privacy = "repo-safe"
-            evidence_required = ["handoff_summary", "tests_run"]
-            """,
-        )
-        write(self.corp_repo / "org" / "contracts" / "agent-os-done" / "body.md", "Record task evidence.")
-        write(
-            self.corp_repo / "org" / "flows" / "agent-os-prep" / "item.toml",
-            """
-            id = "corp.shadowknight.flow.agent-os-prep"
-            kind = "flow"
-            title = "Agent OS Prep"
-            privacy = "repo-safe"
-            inputs = ["task_state", "memory_summary"]
-            outputs = ["selected_context", "handoff_requirements"]
-            evidence_required = ["selected_context"]
-            """,
-        )
-        write(self.corp_repo / "org" / "flows" / "agent-os-prep" / "body.md", "Prepare context only.")
-        write(
-            self.corp_repo / "org" / "config.toml",
-            """
-            id = "shadowknight"
-            enabled_sources = ["shared-ext"]
-            enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            allowed_profiles = ["planner"]
-            default_profile = "planner"
-            recommended_agent_types = ["shell"]
-            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            protected_fields = ["baseline_policies", "privacy_rules"]
-            """,
-        )
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-agent-os", "--json"])
-        self.assertEqual(exit_code, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["kind"], "agent-os-context")
-        self.assertIn("standards registry", payload["runtime_boundary"]["team_agents_provides"])
-        self.assertIn("task state", payload["runtime_boundary"]["agent_os_provides"])
-        self.assertIn("no task state", payload["runtime_boundary"]["non_goals"])
-        self.assertEqual(payload["workspace"]["profile"], "planner")
-        self.assertIn("corp.shadowknight.contract.agent-os-done", payload["contracts"])
-        self.assertEqual(
-            payload["contracts"]["corp.shadowknight.contract.agent-os-done"]["evidence_required"],
-            ["handoff_summary", "tests_run"],
-        )
-        self.assertIn("corp.shadowknight.flow.agent-os-prep", payload["flows_as_playbooks"])
-        self.assertEqual(
-            payload["flows_as_playbooks"]["corp.shadowknight.flow.agent-os-prep"]["inputs"],
-            ["task_state", "memory_summary"],
-        )
-        shell = payload["trust_review_metadata"]["corp.shadowknight.skill.shell-global"]
-        self.assertEqual(shell["trust_level"], "corp-reviewed")
-        self.assertIn("corp.shadowknight.skill.shell-global", payload["generated_targets"]["codex"])
 
     def test_context_rejects_multiple_consumer_views(self) -> None:
         self.configure_machine()
@@ -676,7 +592,7 @@ class TeamAgentsTests(unittest.TestCase):
         stderr = StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
             exit_code = main(
-                ["context", "--workspace", str(self.internal_repo), "--for-harness", "--for-agent-os", "--json"]
+                ["context", "--workspace", str(self.internal_repo), "--for-harness", "--for-workflow-engine", "--json"]
             )
         self.assertEqual(exit_code, 2)
         self.assertIn("choose only one consumer view", stderr.getvalue())
@@ -686,31 +602,30 @@ class TeamAgentsTests(unittest.TestCase):
             self.corp_repo / "org" / "profiles" / "workflow-review.toml",
             """
             id = "workflow-review"
-            autonomy_level = "interactive"
             stop_conditions = ["external_system_unavailable"]
 
             [activation]
-            required = ["corp.shadowknight.contract.workflow-done"]
-            enabled = ["corp.shadowknight.flow.workflow-review"]
+            required = ["corp.shadowknight.completion_gate.workflow-done"]
+            enabled = ["corp.shadowknight.playbook.workflow-review"]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "workflow-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "workflow-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.workflow-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.workflow-done"
+            kind = "completion_gate"
             title = "Workflow Done"
             privacy = "repo-safe"
             owner = "platform"
             evidence_required = ["approval_record", "verification_result"]
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "workflow-done" / "body.md", "Workflow contract.")
+        write(self.corp_repo / "org" / "completion_gates" / "workflow-done" / "body.md", "Workflow completion gate.")
         write(
-            self.corp_repo / "org" / "flows" / "workflow-review" / "item.toml",
+            self.corp_repo / "org" / "playbooks" / "workflow-review" / "item.toml",
             """
-            id = "corp.shadowknight.flow.workflow-review"
-            kind = "flow"
+            id = "corp.shadowknight.playbook.workflow-review"
+            kind = "playbook"
             title = "Workflow Review"
             privacy = "repo-safe"
             owner = "workflow-team"
@@ -718,10 +633,9 @@ class TeamAgentsTests(unittest.TestCase):
             outputs = ["review_decision", "evidence_package"]
             evidence_required = ["review_decision"]
             stop_conditions = ["missing_policy_context"]
-            requires_approval_for = ["merge"]
             """,
         )
-        write(self.corp_repo / "org" / "flows" / "workflow-review" / "body.md", "Review workflow.")
+        write(self.corp_repo / "org" / "playbooks" / "workflow-review" / "body.md", "Review workflow.")
         write(
             self.corp_repo / "org" / "config.toml",
             """
@@ -757,16 +671,16 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("no workflow execution", payload["runtime_boundary"]["non_goals"])
         self.assertIn("workflow graph", payload["runtime_boundary"]["workflow_engine_provides"])
         self.assertEqual(payload["workspace"]["profile"], "workflow-review")
-        contract = payload["active_contracts"]["corp.shadowknight.contract.workflow-done"]
-        self.assertEqual(contract["owner"], "platform")
-        self.assertEqual(contract["evidence_required"], ["approval_record", "verification_result"])
-        flow = payload["flows"]["corp.shadowknight.flow.workflow-review"]
-        self.assertEqual(flow["owner"], "workflow-team")
-        self.assertEqual(flow["inputs"], ["pull_request", "policy_context"])
-        self.assertEqual(flow["outputs"], ["review_decision", "evidence_package"])
+        completion_gate = payload["active_completion_gates"]["corp.shadowknight.completion_gate.workflow-done"]
+        self.assertEqual(completion_gate["owner"], "platform")
+        self.assertEqual(completion_gate["evidence_required"], ["approval_record", "verification_result"])
+        playbook = payload["playbooks"]["corp.shadowknight.playbook.workflow-review"]
+        self.assertEqual(playbook["owner"], "workflow-team")
+        self.assertEqual(playbook["inputs"], ["pull_request", "policy_context"])
+        self.assertEqual(playbook["outputs"], ["review_decision", "evidence_package"])
         self.assertIn("missing_policy_context", payload["stop_conditions"])
         self.assertIn("external_system_unavailable", payload["stop_conditions"])
-        self.assertIn("corp.shadowknight.flow.workflow-review", payload["evidence_requirements"])
+        self.assertIn("corp.shadowknight.playbook.workflow-review", payload["evidence_requirements"])
 
     def test_validate_json_reports_governance_status_for_ci(self) -> None:
         self.configure_machine()
@@ -1016,7 +930,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertIn("<!-- team-agents:start -->", agents_md)
         self.assertIn("# Project Agent Guidance", agents_md)
         self.assertIn("Generated context lives under `.agents/`.", agents_md)
-        self.assertIn("## Required Contracts", agents_md)
+        self.assertIn("## Required Completion Gates", agents_md)
         self.assertIn("Active profile/job", agents_md)
         self.assertIn("Use the local generated context under `.agents/`.", claude_md)
         self.assertTrue((self.internal_repo / ".agents" / "skills" / "ext-review" / "SKILL.md").exists())
@@ -1191,7 +1105,7 @@ class TeamAgentsTests(unittest.TestCase):
             set(result.enabled_skills),
             {"corp.shadowknight.skill.shell-global", "user.local.skill.personal-shell"},
         )
-        self.assertNotIn("corp.shadowknight.doc.platform-map", result.active_docs)
+        self.assertNotIn("corp.shadowknight.context.platform-map", result.active_contexts)
 
     def test_non_git_workspace_binding_applies_repo_group_context(self) -> None:
         machine = self.configure_machine()
@@ -1200,7 +1114,7 @@ class TeamAgentsTests(unittest.TestCase):
         result = resolve_workspace(self.bound_workspace, machine, corp, user)
         self.assertEqual(result.workspace_context.matched_repo_group_id, "platform")
         self.assertIn("corp.shadowknight.skill.platform-shared", result.enabled_skills)
-        self.assertIn("corp.shadowknight.doc.platform-map", result.active_docs)
+        self.assertIn("corp.shadowknight.context.platform-map", result.active_contexts)
 
     def test_duplicate_canonical_id_in_layer_fails_validation(self) -> None:
         write(
@@ -1257,23 +1171,23 @@ class TeamAgentsTests(unittest.TestCase):
             """
             id = "local"
             enabled_skills = ["user.local.skill.personal-shell"]
-            optional_contracts = ["user.local.contract.personal-quality"]
+            optional_completion_gates = ["user.local.completion_gate.personal-quality"]
 
             [packs]
             enabled = ["user.local.pack.personal-review"]
 
-            [flows]
-            enabled = ["user.local.flow.preflight"]
+            [playbooks]
+            enabled = ["user.local.playbook.preflight"]
 
             [profiles]
             enabled = ["user.local.profile.shell"]
             """,
         )
         for folder, kind, slug, title in [
-            ("contracts", "contract", "personal-quality", "Personal Quality"),
+            ("completion_gates", "completion_gate", "personal-quality", "Personal Quality"),
             ("packs", "pack", "personal-review", "Personal Review"),
             ("packs", "pack", "inactive-pack", "Inactive Pack"),
-            ("flows", "flow", "preflight", "Preflight"),
+            ("playbooks", "playbook", "preflight", "Preflight"),
             ("profiles", "profile", "shell", "Shell Profile"),
         ]:
             write(
@@ -1287,10 +1201,10 @@ class TeamAgentsTests(unittest.TestCase):
             )
             write(self.user_layer / folder / slug / "body.md", f"{title} body")
         write(
-            self.user_layer / "flows" / "preflight" / "item.toml",
+            self.user_layer / "playbooks" / "preflight" / "item.toml",
             """
-            id = "user.local.flow.preflight"
-            kind = "flow"
+            id = "user.local.playbook.preflight"
+            kind = "playbook"
             title = "Preflight"
             privacy = "repo-safe"
             owner = "developer-experience"
@@ -1305,23 +1219,23 @@ class TeamAgentsTests(unittest.TestCase):
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
-        self.assertIn("user.local.contract.personal-quality", result.active_contracts)
+        self.assertIn("user.local.completion_gate.personal-quality", result.active_completion_gates)
         self.assertIn("user.local.pack.personal-review", result.active_packs)
-        self.assertIn("user.local.flow.preflight", result.active_flows)
+        self.assertIn("user.local.playbook.preflight", result.active_playbooks)
         self.assertIn("user.local.profile.shell", result.active_profiles)
         self.assertNotIn("user.local.pack.inactive-pack", result.items)
         payload = result.to_dict()
-        self.assertEqual(payload["items"]["user.local.contract.personal-quality"]["activated_by"], ["user:local"])
+        self.assertEqual(payload["items"]["user.local.completion_gate.personal-quality"]["activated_by"], ["user:local"])
         self.assertEqual(payload["items"]["user.local.pack.personal-review"]["kind"], "pack")
-        flow = payload["items"]["user.local.flow.preflight"]
-        self.assertEqual(flow["inputs"], ["issue", "repo_context"])
-        self.assertEqual(flow["outputs"], ["patch", "verification_report"])
-        self.assertEqual(flow["evidence_required"], ["tests_run", "risk_notes"])
-        self.assertEqual(flow["stop_conditions"], ["ambiguous_requirement", "security_boundary_unclear"])
+        playbook = payload["items"]["user.local.playbook.preflight"]
+        self.assertEqual(playbook["inputs"], ["issue", "repo_context"])
+        self.assertEqual(playbook["outputs"], ["patch", "verification_report"])
+        self.assertEqual(playbook["evidence_required"], ["tests_run", "risk_notes"])
+        self.assertEqual(playbook["stop_conditions"], ["ambiguous_requirement", "security_boundary_unclear"])
 
         write_sync_output(result)
         index = (self.internal_repo / ".agents" / "index.md").read_text(encoding="utf-8")
-        self.assertIn("- `user.local.flow.preflight`", index)
+        self.assertIn("- `user.local.playbook.preflight`", index)
         self.assertIn("Inputs: `issue`, `repo_context`", index)
         self.assertIn("Outputs: `patch`, `verification_report`", index)
         self.assertIn("Evidence required: `tests_run`, `risk_notes`", index)
@@ -1335,8 +1249,8 @@ class TeamAgentsTests(unittest.TestCase):
             encoding="utf-8",
         )
         for folder, kind, slug, title in [
-            ("contracts", "contract", "pack-done", "Pack Done"),
-            ("docs", "doc", "pack-guide", "Pack Guide"),
+            ("completion_gates", "completion_gate", "pack-done", "Pack Done"),
+            ("contexts", "context", "pack-guide", "Pack Guide"),
             ("skills", "skill", "pack-helper", "Pack Helper"),
         ]:
             write(
@@ -1358,9 +1272,9 @@ class TeamAgentsTests(unittest.TestCase):
             privacy = "repo-safe"
 
             [activation]
-            required = ["corp.shadowknight.contract.pack-done"]
+            required = ["corp.shadowknight.completion_gate.pack-done"]
             enabled = [
-              "corp.shadowknight.doc.pack-guide",
+              "corp.shadowknight.context.pack-guide",
               "corp.shadowknight.pack.review-tools"
             ]
             """,
@@ -1386,13 +1300,13 @@ class TeamAgentsTests(unittest.TestCase):
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         self.assertIn("corp.shadowknight.pack.review-baseline", result.active_packs)
         self.assertIn("corp.shadowknight.pack.review-tools", result.active_packs)
-        self.assertIn("corp.shadowknight.contract.pack-done", result.active_contracts)
-        self.assertIn("corp.shadowknight.doc.pack-guide", result.active_docs)
+        self.assertIn("corp.shadowknight.completion_gate.pack-done", result.active_completion_gates)
+        self.assertIn("corp.shadowknight.context.pack-guide", result.active_contexts)
         self.assertIn("corp.shadowknight.skill.pack-helper", result.enabled_skills)
-        self.assertEqual(result.items["corp.shadowknight.contract.pack-done"].activation_reason, "required")
-        self.assertEqual(result.items["corp.shadowknight.doc.pack-guide"].activation_reason, "enabled")
+        self.assertEqual(result.items["corp.shadowknight.completion_gate.pack-done"].activation_reason, "required")
+        self.assertEqual(result.items["corp.shadowknight.context.pack-guide"].activation_reason, "enabled")
         self.assertEqual(
-            result.items["corp.shadowknight.contract.pack-done"].activated_by,
+            result.items["corp.shadowknight.completion_gate.pack-done"].activated_by,
             ["org:shadowknight", "pack:corp.shadowknight.pack.review-baseline"],
         )
         self.assertEqual(
@@ -1418,22 +1332,22 @@ class TeamAgentsTests(unittest.TestCase):
         repo_config.write_text(
             repo_config.read_text(encoding="utf-8").replace(
                 "\n        [[item_override]]",
-                '\n        required_contracts = ["corp.shadowknight.contract.repo-bootstrap"]\n\n        [[item_override]]',
+                '\n        required_completion_gates = ["corp.shadowknight.completion_gate.repo-bootstrap"]\n\n        [[item_override]]',
             ),
             encoding="utf-8",
         )
         write(
-            self.corp_repo / "repos" / "internal-app" / "contracts" / "repo-bootstrap" / "item.toml",
+            self.corp_repo / "repos" / "internal-app" / "completion_gates" / "repo-bootstrap" / "item.toml",
             """
-            id = "corp.shadowknight.contract.repo-bootstrap"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.repo-bootstrap"
+            kind = "completion_gate"
             title = "Repo Bootstrap"
             privacy = "repo-safe"
             tags = ["bootstrap", "minimal-verification"]
             """,
         )
         write(
-            self.corp_repo / "repos" / "internal-app" / "contracts" / "repo-bootstrap" / "body.md",
+            self.corp_repo / "repos" / "internal-app" / "completion_gates" / "repo-bootstrap" / "body.md",
             """
             # Repo Bootstrap
 
@@ -1456,8 +1370,8 @@ class TeamAgentsTests(unittest.TestCase):
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
-        self.assertIn("corp.shadowknight.contract.repo-bootstrap", result.active_contracts)
-        self.assertEqual(result.items["corp.shadowknight.contract.repo-bootstrap"].activated_by, ["repo:internal-app"])
+        self.assertIn("corp.shadowknight.completion_gate.repo-bootstrap", result.active_completion_gates)
+        self.assertEqual(result.items["corp.shadowknight.completion_gate.repo-bootstrap"].activated_by, ["repo:internal-app"])
 
         write_sync_output(result)
         bootstrap = (self.internal_repo / ".agents" / "bootstrap.md").read_text(encoding="utf-8")
@@ -1483,28 +1397,28 @@ class TeamAgentsTests(unittest.TestCase):
             title = "Coder"
 
             [activation]
-            required = ["corp.shadowknight.contract.repo-bootstrap"]
+            required = ["corp.shadowknight.completion_gate.repo-bootstrap"]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "repo-bootstrap" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "repo-bootstrap" / "item.toml",
             """
-            id = "corp.shadowknight.contract.repo-bootstrap"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.repo-bootstrap"
+            kind = "completion_gate"
             title = "Repo Bootstrap"
             privacy = "repo-safe"
             tags = ["bootstrap"]
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "repo-bootstrap" / "body.md", "Minimal verification: run tests.")
+        write(self.corp_repo / "org" / "completion_gates" / "repo-bootstrap" / "body.md", "Minimal verification: run tests.")
 
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user, profile="coder")
 
-        self.assertIn("corp.shadowknight.contract.repo-bootstrap", result.active_contracts)
-        self.assertEqual(result.items["corp.shadowknight.contract.repo-bootstrap"].activated_by, ["profile:coder"])
+        self.assertIn("corp.shadowknight.completion_gate.repo-bootstrap", result.active_completion_gates)
+        self.assertEqual(result.items["corp.shadowknight.completion_gate.repo-bootstrap"].activated_by, ["profile:coder"])
 
     def test_circular_pack_references_are_rejected(self) -> None:
         write(
@@ -1610,19 +1524,19 @@ class TeamAgentsTests(unittest.TestCase):
             id = "local"
 
             [activation]
-            required = ["user.local.contract.personal-done"]
+            required = ["user.local.completion_gate.personal-done"]
             enabled = [
               "user.local.skill.personal-shell",
-              "user.local.doc.personal-notes",
-              "user.local.flow.personal-flow"
+              "user.local.context.personal-notes",
+              "user.local.playbook.personal-playbook"
             ]
             recommended = ["user.local.pack.suggested-pack"]
             """,
         )
         for folder, kind, slug, title in [
-            ("contracts", "contract", "personal-done", "Personal Done"),
-            ("docs", "doc", "personal-notes", "Personal Notes"),
-            ("flows", "flow", "personal-flow", "Personal Flow"),
+            ("completion_gates", "completion_gate", "personal-done", "Personal Done"),
+            ("contexts", "context", "personal-notes", "Personal Notes"),
+            ("playbooks", "playbook", "personal-playbook", "Personal Playbook"),
             ("packs", "pack", "suggested-pack", "Suggested Pack"),
         ]:
             write(
@@ -1641,10 +1555,10 @@ class TeamAgentsTests(unittest.TestCase):
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
         self.assertIn("user.local.skill.personal-shell", result.enabled_skills)
-        self.assertIn("user.local.doc.personal-notes", result.active_docs)
-        self.assertIn("user.local.flow.personal-flow", result.active_flows)
-        self.assertIn("user.local.contract.personal-done", result.active_contracts)
-        self.assertEqual(result.items["user.local.contract.personal-done"].activation_reason, "required")
+        self.assertIn("user.local.context.personal-notes", result.active_contexts)
+        self.assertIn("user.local.playbook.personal-playbook", result.active_playbooks)
+        self.assertIn("user.local.completion_gate.personal-done", result.active_completion_gates)
+        self.assertEqual(result.items["user.local.completion_gate.personal-done"].activation_reason, "required")
         self.assertIn("user.local.pack.suggested-pack", result.recommended_items)
         self.assertNotIn("user.local.pack.suggested-pack", result.items)
 
@@ -1656,26 +1570,26 @@ class TeamAgentsTests(unittest.TestCase):
 
             [activation]
             enabled = ["corp.shadowknight.skill.repo-onboarding"]
-            required = ["corp.shadowknight.contract.review-done"]
+            required = ["corp.shadowknight.completion_gate.review-done"]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "review-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.review-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.review-done"
+            kind = "completion_gate"
             title = "Review Done"
             privacy = "repo-safe"
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done")
+        write(self.corp_repo / "org" / "completion_gates" / "review-done" / "body.md", "Review done")
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
         self.assertIn("corp.shadowknight.skill.repo-onboarding", result.enabled_skills)
-        self.assertIn("corp.shadowknight.contract.review-done", result.active_contracts)
-        self.assertEqual(result.items["corp.shadowknight.contract.review-done"].activated_by, ["profile:reviewer"])
+        self.assertIn("corp.shadowknight.completion_gate.review-done", result.active_completion_gates)
+        self.assertEqual(result.items["corp.shadowknight.completion_gate.review-done"].activated_by, ["profile:reviewer"])
 
     def test_resolution_warns_about_compatibility_mismatches(self) -> None:
         org_config = self.corp_repo / "org" / "config.toml"
@@ -1725,41 +1639,41 @@ class TeamAgentsTests(unittest.TestCase):
             + 'default_profile = "coder"\n',
             encoding="utf-8",
         )
-        for slug, title in [("coder-flow", "Coder Flow"), ("reviewer-flow", "Reviewer Flow")]:
+        for slug, title in [("coder-playbook", "Coder Playbook"), ("reviewer-playbook", "Reviewer Playbook")]:
             write(
-                self.corp_repo / "org" / "flows" / slug / "item.toml",
+                self.corp_repo / "org" / "playbooks" / slug / "item.toml",
                 f"""
-                id = "corp.shadowknight.flow.{slug}"
-                kind = "flow"
+                id = "corp.shadowknight.playbook.{slug}"
+                kind = "playbook"
                 title = "{title}"
                 privacy = "repo-safe"
                 """,
             )
-            write(self.corp_repo / "org" / "flows" / slug / "body.md", f"{title} body")
+            write(self.corp_repo / "org" / "playbooks" / slug / "body.md", f"{title} body")
         write(
-            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "review-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.review-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.review-done"
+            kind = "completion_gate"
             title = "Review Done"
             privacy = "repo-safe"
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done contract")
+        write(self.corp_repo / "org" / "completion_gates" / "review-done" / "body.md", "Review done completion gate")
         write(
             self.corp_repo / "org" / "profiles" / "coder.toml",
             """
             id = "coder"
-            enabled_flows = ["corp.shadowknight.flow.coder-flow"]
-            docs = ["corp.shadowknight.doc.platform-map"]
+            enabled_playbooks = ["corp.shadowknight.playbook.coder-playbook"]
+            contexts = ["corp.shadowknight.context.platform-map"]
             """,
         )
         write(
             self.corp_repo / "org" / "profiles" / "reviewer.toml",
             """
             id = "reviewer"
-            enabled_flows = ["corp.shadowknight.flow.reviewer-flow"]
-            required_contracts = ["corp.shadowknight.contract.review-done"]
+            enabled_playbooks = ["corp.shadowknight.playbook.reviewer-playbook"]
+            required_completion_gates = ["corp.shadowknight.completion_gate.review-done"]
             enabled_skills = ["corp.shadowknight.skill.repo-onboarding"]
             """,
         )
@@ -1770,19 +1684,19 @@ class TeamAgentsTests(unittest.TestCase):
         default_result = resolve_workspace(self.internal_repo, machine, corp, user)
         reviewer_result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
         self.assertEqual(default_result.workspace_context.profile, "coder")
-        self.assertIn("corp.shadowknight.flow.coder-flow", default_result.active_flows)
-        self.assertNotIn("corp.shadowknight.flow.reviewer-flow", default_result.items)
+        self.assertIn("corp.shadowknight.playbook.coder-playbook", default_result.active_playbooks)
+        self.assertNotIn("corp.shadowknight.playbook.reviewer-playbook", default_result.items)
         self.assertEqual(reviewer_result.workspace_context.profile, "reviewer")
-        self.assertIn("corp.shadowknight.flow.reviewer-flow", reviewer_result.active_flows)
-        self.assertIn("corp.shadowknight.contract.review-done", reviewer_result.active_contracts)
+        self.assertIn("corp.shadowknight.playbook.reviewer-playbook", reviewer_result.active_playbooks)
+        self.assertIn("corp.shadowknight.completion_gate.review-done", reviewer_result.active_completion_gates)
         self.assertIn("corp.shadowknight.skill.repo-onboarding", reviewer_result.enabled_skills)
         self.assertEqual(reviewer_result.layer_chain, ["org", "repo-group", "repo", "profile", "user"])
         self.assertEqual(
-            reviewer_result.items["corp.shadowknight.contract.review-done"].activated_by,
+            reviewer_result.items["corp.shadowknight.completion_gate.review-done"].activated_by,
             ["profile:reviewer"],
         )
         self.assertEqual(
-            reviewer_result.to_dict()["items"]["corp.shadowknight.contract.review-done"]["selected_by_profiles"],
+            reviewer_result.to_dict()["items"]["corp.shadowknight.completion_gate.review-done"]["selected_by_profiles"],
             ["reviewer"],
         )
 
@@ -1793,22 +1707,22 @@ class TeamAgentsTests(unittest.TestCase):
             encoding="utf-8",
         )
         write(
-            self.corp_repo / "org" / "contracts" / "review-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "review-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.review-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.review-done"
+            kind = "completion_gate"
             title = "Review Done"
             privacy = "repo-safe"
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "review-done" / "body.md", "Review done contract")
+        write(self.corp_repo / "org" / "completion_gates" / "review-done" / "body.md", "Review done completion gate")
         write(
             self.corp_repo / "org" / "profiles" / "reviewer.toml",
             """
             id = "reviewer"
 
             [activation]
-            required = ["corp.shadowknight.contract.review-done"]
+            required = ["corp.shadowknight.completion_gate.review-done"]
             """,
         )
         write(
@@ -1825,7 +1739,7 @@ class TeamAgentsTests(unittest.TestCase):
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user, profile="reviewer")
-        self.assertIn("corp.shadowknight.contract.review-done", result.active_contracts)
+        self.assertIn("corp.shadowknight.completion_gate.review-done", result.active_completion_gates)
         self.assertIn("user.local.skill.personal-shell", result.enabled_skills)
         self.assertEqual(result.layer_chain, ["org", "repo-group", "repo", "profile", "profile", "user"])
 
@@ -2016,42 +1930,6 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(deprecated_check["status"], "warn")
         self.assertIn("corp.shadowknight.skill.shell-global", deprecated_check["detail"])
 
-    def test_doctor_warns_when_background_profile_has_no_stop_conditions(self) -> None:
-        write(
-            self.corp_repo / "org" / "config.toml",
-            """
-            id = "shadowknight"
-            enabled_sources = ["shared-ext"]
-            enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            default_profile = "runner"
-            recommended_agent_types = ["shell"]
-            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            protected_fields = ["baseline_policies", "privacy_rules"]
-            """,
-        )
-        write(
-            self.corp_repo / "org" / "profiles" / "runner.toml",
-            """
-            id = "runner"
-            title = "Runner"
-            autonomy_level = "background"
-
-            [activation]
-            enabled = ["corp.shadowknight.skill.shell-global"]
-            """,
-        )
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
-        self.assertEqual(exit_code, 0)
-        report = json.loads(stdout.getvalue())
-        autonomy_check = next(check for check in report["checks"] if check["name"] == "autonomy-stop-conditions")
-        self.assertEqual(autonomy_check["status"], "warn")
-        self.assertIn("runner", autonomy_check["detail"])
-
     def test_high_risk_intended_consumers_warn_without_safety_metadata(self) -> None:
         write(
             self.corp_repo / "org" / "config.toml",
@@ -2071,8 +1949,7 @@ class TeamAgentsTests(unittest.TestCase):
             """
             id = "runner"
             title = "Runner"
-            autonomy_level = "interactive"
-            intended_consumers = ["harness", "agent-os"]
+            intended_consumers = ["harness", "workflow-engine"]
 
             [activation]
             enabled = ["corp.shadowknight.skill.shell-global"]
@@ -2087,7 +1964,6 @@ class TeamAgentsTests(unittest.TestCase):
         report = json.loads(stdout.getvalue())
         codes = {warning["code"] for warning in report["consumer_safety_warnings"]}
         self.assertIn("missing-consumer-stop-conditions", codes)
-        self.assertIn("missing-consumer-permission-notes", codes)
 
         stdout = StringIO()
         stderr = StringIO()
@@ -2095,7 +1971,6 @@ class TeamAgentsTests(unittest.TestCase):
             exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-harness", "--json"])
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["tool_permissions"]["profiles"][0]["intended_consumers"], ["harness", "agent-os"])
         context_codes = {warning["code"] for warning in payload["consumer_safety_warnings"]}
         self.assertEqual(codes, context_codes)
 
@@ -2140,53 +2015,6 @@ class TeamAgentsTests(unittest.TestCase):
         )
         self.assertIn("client repo", warning["detail"])
         self.assertIn("client data handling", warning["remediation"])
-
-    def test_audit_warns_when_high_autonomy_profile_lacks_permission_notes(self) -> None:
-        write(
-            self.corp_repo / "org" / "config.toml",
-            """
-            id = "shadowknight"
-            enabled_sources = ["shared-ext"]
-            enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            default_profile = "runner"
-            recommended_agent_types = ["shell"]
-            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            protected_fields = ["baseline_policies", "privacy_rules"]
-            """,
-        )
-        write(
-            self.corp_repo / "org" / "profiles" / "runner.toml",
-            """
-            id = "runner"
-            title = "Runner"
-            autonomy_level = "autonomous"
-            stop_conditions = ["secrets_detected"]
-
-            [activation]
-            enabled = ["corp.shadowknight.skill.shell-global"]
-            """,
-        )
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["audit", "--workspace", str(self.internal_repo), "--json"])
-        self.assertEqual(exit_code, 0)
-        report = json.loads(stdout.getvalue())
-        self.assertIn(
-            "high-autonomy profile lacks tool permission notes: runner",
-            report["sprawl_warnings"],
-        )
-
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
-        self.assertEqual(exit_code, 0)
-        doctor_report = json.loads(stdout.getvalue())
-        codes = {warning["code"] for warning in doctor_report["consumer_safety_warnings"]}
-        self.assertIn("missing-consumer-permission-notes", codes)
 
     def test_review_status_and_deprecation_metadata_surface_in_context_and_audit(self) -> None:
         write(
@@ -2315,7 +2143,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertFalse(entries["forbidden_source_patterns"]["compliant"])
         self.assertIn("remediation", entries["forbidden_source_patterns"])
 
-    def test_doctor_json_reports_contract_compliance(self) -> None:
+    def test_doctor_json_reports_completion_gate_compliance(self) -> None:
         write(
             self.corp_repo / "org" / "config.toml",
             """
@@ -2323,27 +2151,27 @@ class TeamAgentsTests(unittest.TestCase):
             enabled_sources = ["shared-ext"]
             enabled_skills = ["corp.shadowknight.skill.shell-global"]
             baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            required_contracts = ["corp.shadowknight.contract.definition-of-done"]
+            required_completion_gates = ["corp.shadowknight.completion_gate.definition-of-done"]
             recommended_agent_types = ["shell"]
             minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
             protected_fields = ["baseline_policies", "privacy_rules"]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.definition-of-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.definition-of-done"
+            kind = "completion_gate"
             title = "Definition Of Done"
             privacy = "repo-safe"
             policy_rules = [
-              { rule = "required_contract_ids", severity = "fail", contract_ids = ["corp.shadowknight.contract.missing-evidence"], remediation = "Require the evidence contract" }
+              { rule = "required_completion_gate_ids", severity = "fail", completion_gate_ids = ["corp.shadowknight.completion_gate.missing-evidence"], remediation = "Require the evidence completion gate" }
             ]
             """,
         )
         write(
-            self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md",
-            "Definition of done contract",
+            self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "body.md",
+            "Definition of done completion_gate",
         )
         self.configure_machine()
         stdout = StringIO()
@@ -2352,24 +2180,24 @@ class TeamAgentsTests(unittest.TestCase):
             exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
         self.assertEqual(exit_code, 1)
         report = json.loads(stdout.getvalue())
-        self.assertIn("contract_compliance", report)
-        self.assertIn("corp.shadowknight.contract.definition-of-done", report["resolution"]["active_contracts"])
-        entries = {entry["rule"]: entry for entry in report["contract_compliance"]}
-        self.assertFalse(entries["required_contract_ids"]["compliant"])
-        self.assertIn("missing required contracts", entries["required_contract_ids"]["detail"])
+        self.assertIn("completion_gate_compliance", report)
+        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", report["resolution"]["active_completion_gates"])
+        entries = {entry["rule"]: entry for entry in report["completion_gate_compliance"]}
+        self.assertFalse(entries["required_completion_gate_ids"]["compliant"])
+        self.assertIn("missing required completion gates", entries["required_completion_gate_ids"]["detail"])
 
     def test_contract_evidence_requirements_surface_in_context_and_audit(self) -> None:
         org_config = self.corp_repo / "org" / "config.toml"
         org_config.write_text(
             org_config.read_text(encoding="utf-8")
-            + 'required_contracts = ["corp.shadowknight.contract.definition-of-done"]\n',
+            + 'required_completion_gates = ["corp.shadowknight.completion_gate.definition-of-done"]\n',
             encoding="utf-8",
         )
         write(
-            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.definition-of-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.definition-of-done"
+            kind = "completion_gate"
             title = "Definition Of Done"
             privacy = "repo-safe"
             evidence_required = [
@@ -2380,15 +2208,15 @@ class TeamAgentsTests(unittest.TestCase):
             ]
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Show evidence before done.")
+        write(self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "body.md", "Show evidence before done.")
 
         machine = self.configure_machine()
         corp = load_corp_repo(machine.corp_repo_path)
         user = load_user_layer(machine.user_layer_path)
         result = resolve_workspace(self.internal_repo, machine, corp, user)
-        self.assertIn("corp.shadowknight.contract.definition-of-done", result.active_contracts)
+        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", result.active_completion_gates)
         self.assertEqual(
-            result.to_dict()["items"]["corp.shadowknight.contract.definition-of-done"]["evidence_required"],
+            result.to_dict()["items"]["corp.shadowknight.completion_gate.definition-of-done"]["evidence_required"],
             ["tests_run", "files_changed_summary", "risk_notes", "verification_command_output"],
         )
 
@@ -2407,7 +2235,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         audit = json.loads(stdout.getvalue())
         self.assertEqual(
-            audit["evidence_requirements"]["corp.shadowknight.contract.definition-of-done"],
+            audit["evidence_requirements"]["corp.shadowknight.completion_gate.definition-of-done"],
             ["tests_run", "files_changed_summary", "risk_notes", "verification_command_output"],
         )
 
@@ -2415,29 +2243,29 @@ class TeamAgentsTests(unittest.TestCase):
         org_config = self.corp_repo / "org" / "config.toml"
         org_config.write_text(
             org_config.read_text(encoding="utf-8")
-            + 'required_contracts = ["corp.shadowknight.contract.definition-of-done"]\n',
+            + 'required_completion_gates = ["corp.shadowknight.completion_gate.definition-of-done"]\n',
             encoding="utf-8",
         )
         write(
-            self.corp_repo / "org" / "contracts" / "definition-of-done" / "item.toml",
+            self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.definition-of-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.definition-of-done"
+            kind = "completion_gate"
             title = "Definition Of Done"
             privacy = "repo-safe"
             """,
         )
-        write(self.corp_repo / "org" / "contracts" / "definition-of-done" / "body.md", "Required contract")
+        write(self.corp_repo / "org" / "completion_gates" / "definition-of-done" / "body.md", "Required completion gate")
         write(
-            self.user_layer / "contracts" / "definition-of-done" / "item.toml",
+            self.user_layer / "completion_gates" / "definition-of-done" / "item.toml",
             """
-            id = "corp.shadowknight.contract.definition-of-done"
-            kind = "contract"
+            id = "corp.shadowknight.completion_gate.definition-of-done"
+            kind = "completion_gate"
             title = "Weakened Definition Of Done"
             privacy = "repo-safe"
             """,
         )
-        write(self.user_layer / "contracts" / "definition-of-done" / "body.md", "User replacement")
+        write(self.user_layer / "completion_gates" / "definition-of-done" / "body.md", "User replacement")
         machine = MachineConfig(
             corp_repo_path=self.corp_repo,
             user_layer_path=self.user_layer,
@@ -2709,8 +2537,8 @@ class TeamAgentsTests(unittest.TestCase):
                     "platform",
                     "--enable-skill",
                     "corp.shadowknight.skill.platform-shared",
-                    "--enable-doc",
-                    "corp.shadowknight.doc.platform-map",
+                    "--enable-context",
+                    "corp.shadowknight.context.platform-map",
                     "--recommended-agent-type",
                     "planner",
                     "--json",
@@ -3158,7 +2986,7 @@ class TeamAgentsTests(unittest.TestCase):
             "platform",
             "corp.shadowknight.skill.platform-shared",
             "",
-            "corp.shadowknight.doc.platform-map",
+            "corp.shadowknight.context.platform-map",
             "planner",
         ]
         stdout = StringIO()
@@ -3178,7 +3006,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(payload["repo_id"], "prompted-service")
         self.assertEqual(payload["repo_group_id"], "platform")
         self.assertIn("corp.shadowknight.skill.platform-shared", payload["enabled_skills"])
-        self.assertIn("corp.shadowknight.doc.platform-map", payload["docs"])
+        self.assertIn("corp.shadowknight.context.platform-map", payload["contexts"])
         self.assertIn("planner", payload["recommended_agent_types"])
         self.assertTrue((fresh_repo / ".agents" / "index.md").exists())
 
@@ -3404,9 +3232,9 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertFalse((user_dest / "skills" / "reviewer").exists())
         self.assertTrue((corp_dest / "org" / "skills" / "reviewer").exists())
         body = (corp_dest / "org" / "skills" / "reviewer" / "body.md").read_text(encoding="utf-8")
-        self.assertIn("corp.example-org.doc.reviewer-notes-md", body)
-        doc_item = (corp_dest / "org" / "docs" / "reviewer-notes-md" / "item.toml").read_text(encoding="utf-8")
-        self.assertIn('id = "corp.example-org.doc.reviewer-notes-md"', doc_item)
+        self.assertIn("corp.example-org.context.reviewer-notes-md", body)
+        doc_item = (corp_dest / "org" / "contexts" / "reviewer-notes-md" / "item.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "corp.example-org.context.reviewer-notes-md"', doc_item)
 
     def test_promote_skills_preserves_promotion_checklist_without_warning(self) -> None:
         self.configure_machine()
@@ -3432,7 +3260,7 @@ class TeamAgentsTests(unittest.TestCase):
             evidence = "Caught missing downgrade paths in sampled PRs"
             risks = "May over-warn for data-only migrations"
             scope = "Migration review only"
-            redundancy = "Not covered by existing contracts"
+            redundancy = "Not covered by existing completion gates"
             """,
         )
         write(self.user_layer / "skills" / "evidence-backed" / "body.md", "Evidence backed body")

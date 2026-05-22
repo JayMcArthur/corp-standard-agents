@@ -62,7 +62,7 @@ def write_machine_config(config: MachineConfig, path: Path | None = None) -> Pat
 
 def ensure_user_layer_layout(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    for name in ["skills", "policies", "docs", "contracts", "flows", "packs", "profiles", "activations", "sources", "workspaces"]:
+    for name in ["skills", "policies", "contexts", "completion_gates", "playbooks", "packs", "profiles", "activations", "sources", "workspaces"]:
         (root / name).mkdir(parents=True, exist_ok=True)
     config_path = root / "config.toml"
     if not config_path.exists():
@@ -76,8 +76,8 @@ def ensure_user_layer_layout(root: Path) -> None:
                 "disabled_skills": [],
                 "optional_policies": [],
                 "disabled_optional_policies": [],
-                "docs": [],
-                "disabled_docs": [],
+                "contexts": [],
+                "disabled_contexts": [],
                 "preferred_agent_types": [],
             },
         )

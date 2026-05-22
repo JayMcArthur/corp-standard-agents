@@ -54,7 +54,7 @@ def promote_skills(
 
         related_docs = collect_related_docs(source_root, source_type, source_namespace, slug)
         doc_id_map = {
-            old_doc_id: f"{dest_type}.{dest_namespace}.doc.{doc_slug}"
+            old_doc_id: f"{dest_type}.{dest_namespace}.context.{doc_slug}"
             for old_doc_id, doc_slug, _doc_dir in related_docs
         }
 
@@ -63,9 +63,9 @@ def promote_skills(
         rewrite_body_references(dest_skill_dir / "body.md", doc_id_map)
 
         for old_doc_id, doc_slug, doc_dir in related_docs:
-            dest_doc_dir = dest_root / "docs" / doc_slug
+            dest_doc_dir = dest_root / "contexts" / doc_slug
             if dest_doc_dir.exists():
-                raise ValidationError(f"Destination doc already exists: {dest_doc_dir}")
+                raise ValidationError(f"Destination context already exists: {dest_doc_dir}")
             shutil.move(str(doc_dir), str(dest_doc_dir))
             rewrite_item_id(dest_doc_dir / "item.toml", doc_id_map[old_doc_id])
 
@@ -147,14 +147,14 @@ def resolve_layer_target(corp_root: Path, user_root: Path, layer: str, repo_id: 
 
 
 def collect_related_docs(source_root: Path, source_type: str, source_namespace: str, skill_slug: str) -> list[tuple[str, str, Path]]:
-    docs_root = source_root / "docs"
+    docs_root = source_root / "contexts"
     if not docs_root.exists():
         return []
     related: list[tuple[str, str, Path]] = []
     prefix = f"{skill_slug}-"
     for doc_dir in sorted(path for path in docs_root.iterdir() if path.is_dir() and path.name.startswith(prefix)):
         doc_slug = doc_dir.name
-        doc_id = f"{source_type}.{source_namespace}.doc.{doc_slug}"
+        doc_id = f"{source_type}.{source_namespace}.context.{doc_slug}"
         related.append((doc_id, doc_slug, doc_dir))
     return related
 

@@ -13,7 +13,6 @@ class ConsumerDocsContractTests(unittest.TestCase):
             "corp-maintainers.md",
             "developers.md",
             "harnesses.md",
-            "agent-os.md",
             "workflow-engines.md",
             "ci-governance.md",
         ]:

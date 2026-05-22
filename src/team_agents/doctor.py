@@ -87,7 +87,7 @@ def run_doctor(
             add_check("tracked-router-files", "ok", "router files are untracked or absent")
 
     policy_compliance: list[dict[str, Any]] = []
-    contract_compliance: list[dict[str, Any]] = []
+    completion_gate_compliance: list[dict[str, Any]] = []
     context_quality_warnings: list[dict[str, str]] = []
     consumer_safety_warnings: list[dict[str, str]] = []
     if resolution is not None:
@@ -136,21 +136,8 @@ def run_doctor(
             )
         else:
             add_check("deprecated-active-items", "ok", "no active deprecated items")
-        unsafe_autonomy_profiles = [
-            profile.identifier
-            for profile in resolution.selected_profile_configs
-            if profile.autonomy_level in {"background", "autonomous"} and not profile.stop_conditions
-        ]
-        if unsafe_autonomy_profiles:
-            add_check(
-                "autonomy-stop-conditions",
-                "warn",
-                "background/autonomous profiles require stop_conditions: " + ", ".join(unsafe_autonomy_profiles),
-            )
-        else:
-            add_check("autonomy-stop-conditions", "ok", "selected profile autonomy has stop conditions or is interactive")
         policy_compliance = evaluate_policy_compliance(machine_config, user_root, resolution)
-        contract_compliance = evaluate_contract_compliance(machine_config, user_root, resolution)
+        completion_gate_compliance = evaluate_completion_gate_compliance(machine_config, user_root, resolution)
         context_quality_warnings = evaluate_context_quality(resolution)
         for warning in context_quality_warnings:
             add_check(
@@ -171,7 +158,7 @@ def run_doctor(
         "fail": sum(1 for check in checks if check["status"] == "fail"),
     }
     if resolution is not None:
-        for entry in policy_compliance + contract_compliance:
+        for entry in policy_compliance + completion_gate_compliance:
             status = "ok" if entry["compliant"] else entry["severity"]
             summary[status] += 1
 
@@ -191,7 +178,7 @@ def run_doctor(
         "summary": summary,
         "checks": checks,
         "policy_compliance": policy_compliance,
-        "contract_compliance": contract_compliance,
+        "completion_gate_compliance": completion_gate_compliance,
         "context_quality_warnings": context_quality_warnings,
         "consumer_safety_warnings": consumer_safety_warnings,
     }
@@ -216,10 +203,10 @@ def run_doctor(
             },
             "enabled_skills": resolution.enabled_skills,
             "active_policies": resolution.active_policies,
-            "active_docs": resolution.active_docs,
-            "active_contracts": resolution.active_contracts,
+            "active_contexts": resolution.active_contexts,
+            "active_completion_gates": resolution.active_completion_gates,
             "active_packs": resolution.active_packs,
-            "active_flows": resolution.active_flows,
+            "active_playbooks": resolution.active_playbooks,
             "active_profiles": resolution.active_profiles,
             "recommended_items": resolution.recommended_items,
             "recommended_agent_types": resolution.recommended_agent_types,
@@ -314,10 +301,10 @@ def doctor_text(report: dict[str, Any]) -> str:
                 f"sources: {', '.join(resolution['enabled_sources']) or 'none'}",
                 f"skills: {', '.join(resolution['enabled_skills']) or 'none'}",
                 f"policies: {', '.join(resolution['active_policies']) or 'none'}",
-                f"docs: {', '.join(resolution['active_docs']) or 'none'}",
-                f"contracts: {', '.join(resolution['active_contracts']) or 'none'}",
+                f"contexts: {', '.join(resolution['active_contexts']) or 'none'}",
+                f"completion gates: {', '.join(resolution['active_completion_gates']) or 'none'}",
                 f"packs: {', '.join(resolution['active_packs']) or 'none'}",
-                f"flows: {', '.join(resolution['active_flows']) or 'none'}",
+                f"playbooks: {', '.join(resolution['active_playbooks']) or 'none'}",
                 f"profiles: {', '.join(resolution['active_profiles']) or 'none'}",
                 f"recommended-items: {', '.join(resolution['recommended_items']) or 'none'}",
             ]
@@ -331,9 +318,9 @@ def doctor_text(report: dict[str, Any]) -> str:
             lines.append(
                 f"- [{status}] {entry['item_id']}::{entry['rule']}: {entry['detail']} (remediation: {entry['remediation']})"
             )
-    if report.get("contract_compliance"):
-        lines.extend(["", "contract-compliance:"])
-        for entry in report["contract_compliance"]:
+    if report.get("completion_gate_compliance"):
+        lines.extend(["", "completion-gate-compliance:"])
+        for entry in report["completion_gate_compliance"]:
             status = "ok" if entry["compliant"] else entry["severity"]
             lines.append(
                 f"- [{status}] {entry['item_id']}::{entry['rule']}: {entry['detail']} (remediation: {entry['remediation']})"
@@ -349,24 +336,16 @@ def doctor_text(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-HIGH_RISK_CONSUMERS = {"harness", "harnesses", "agent-os", "agent_os", "workflow-engine", "workflow_engines"}
+HIGH_RISK_CONSUMERS = {"harness", "harnesses", "workflow-engine", "workflow_engines"}
 
 
 def evaluate_consumer_safety_warnings(resolution: ResolutionResult) -> list[dict[str, str]]:
     warnings: list[dict[str, str]] = []
     for profile in resolution.selected_profile_configs:
         high_risk = set(profile.intended_consumers) & HIGH_RISK_CONSUMERS
-        if profile.autonomy_level in {"background", "autonomous"}:
-            high_risk.add(profile.autonomy_level)
         if not high_risk:
             continue
         high_risk_labels = sorted(high_risk)
-        has_permission_notes = bool(
-            profile.requires_human_approval
-            or profile.allowed_tool_classes
-            or profile.requires_approval_for
-            or profile.forbidden_tool_classes
-        )
         if not profile.stop_conditions:
             warnings.append(
                 {
@@ -374,17 +353,7 @@ def evaluate_consumer_safety_warnings(resolution: ResolutionResult) -> list[dict
                     "profile": profile.identifier,
                     "consumers": ", ".join(high_risk_labels),
                     "detail": f"profile {profile.identifier} targets high-risk consumers without stop_conditions",
-                    "remediation": "add stop_conditions for autonomous, harness, Agent OS, or workflow-engine use",
-                }
-            )
-        if not has_permission_notes:
-            warnings.append(
-                {
-                    "code": "missing-consumer-permission-notes",
-                    "profile": profile.identifier,
-                    "consumers": ", ".join(high_risk_labels),
-                    "detail": f"profile {profile.identifier} targets high-risk consumers without permission metadata",
-                    "remediation": "add requires_human_approval, allowed_tool_classes, requires_approval_for, or forbidden_tool_classes",
+                    "remediation": "add stop_conditions for harness or workflow-engine use",
                 }
             )
     return warnings
@@ -396,10 +365,10 @@ def evaluate_context_quality(resolution: ResolutionResult) -> list[dict[str, str
         set(
             resolution.enabled_skills
             + resolution.active_policies
-            + resolution.active_docs
-            + resolution.active_contracts
+            + resolution.active_contexts
+            + resolution.active_completion_gates
             + resolution.active_packs
-            + resolution.active_flows
+            + resolution.active_playbooks
             + resolution.active_profiles
         )
     )
@@ -428,7 +397,7 @@ def evaluate_context_quality(resolution: ResolutionResult) -> list[dict[str, str
         )
     broad_profile_docs = [
         item_id
-        for item_id in resolution.active_docs
+        for item_id in resolution.active_contexts
         if (resolved := resolution.items.get(item_id)) is not None
         and selected_by_profile(resolved.activated_by)
         and is_broad_doc(resolved.item.item_id, resolved.item.title, resolved.item.body)
@@ -436,12 +405,12 @@ def evaluate_context_quality(resolution: ResolutionResult) -> list[dict[str, str
     if broad_profile_docs:
         warnings.append(
             {
-                "code": "profile-broad-docs",
-                "detail": "profile-selected docs look broad/global without a scoped reason: " + ", ".join(broad_profile_docs),
-                "remediation": "replace broad profile docs with narrower docs, or keep them recommended until a profile-specific reason exists",
+                "code": "profile-broad-contexts",
+                "detail": "profile-selected contexts look broad/global without a scoped reason: " + ", ".join(broad_profile_docs),
+                "remediation": "replace broad profile contexts with narrower contexts, or keep them recommended until a profile-specific reason exists",
             }
         )
-    for kind_name, item_ids in [("doc", resolution.active_docs), ("policy", resolution.active_policies)]:
+    for kind_name, item_ids in [("context", resolution.active_contexts), ("policy", resolution.active_policies)]:
         duplicates = duplicate_titles(item_ids, resolution)
         for title, duplicate_ids in duplicates.items():
             warnings.append(
@@ -453,29 +422,29 @@ def evaluate_context_quality(resolution: ResolutionResult) -> list[dict[str, str
             )
     verification_contracts = [
         item_id
-        for item_id in resolution.active_contracts
+        for item_id in resolution.active_completion_gates
         if (resolved := resolution.items.get(item_id)) is not None and has_verification_boundary(resolved.item)
     ]
     if not verification_contracts:
         warnings.append(
             {
-                "code": "missing-verification-contract",
-                "detail": "no active contract declares verification or evidence expectations",
-                "remediation": "require a definition-of-done or verification contract with evidence_required values",
+                "code": "missing-verification-completion-gate",
+                "detail": "no active completion gate declares verification or evidence expectations",
+                "remediation": "require a definition-of-done or verification completion gate with evidence_required values",
             }
         )
     if (resolution.workspace_context.repo_class or "").lower() == "client":
         boundary_items = [
             item_id
-            for item_id in resolution.active_policies + resolution.active_contracts
+            for item_id in resolution.active_policies + resolution.active_completion_gates
             if (resolved := resolution.items.get(item_id)) is not None and has_client_data_boundary(resolved.item)
         ]
         if not boundary_items:
             warnings.append(
                 {
                     "code": "missing-client-data-boundary",
-                    "detail": "client repo has no active client-data boundary policy or contract",
-                    "remediation": "activate a repo-safe policy or contract covering client data handling before syncing agent context",
+                    "detail": "client repo has no active client-data boundary policy or completion_gate",
+                    "remediation": "activate a repo-safe policy or completion_gate covering client data handling before syncing agent context",
                 }
             )
     return warnings
@@ -562,22 +531,22 @@ def evaluate_policy_compliance(
     return entries
 
 
-def evaluate_contract_compliance(
+def evaluate_completion_gate_compliance(
     machine_config: MachineConfig,
     user_root: Path,
     resolution: ResolutionResult,
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
-    for contract_id in resolution.active_contracts:
-        resolved = resolution.items.get(contract_id)
+    for completion_gate_id in resolution.active_completion_gates:
+        resolved = resolution.items.get(completion_gate_id)
         if resolved is None or not resolved.item.policy_rules:
             continue
         for rule in resolved.item.policy_rules:
             entries.append(
                 evaluate_policy_rule(
-                    policy_id=contract_id,
+                    policy_id=completion_gate_id,
                     policy_title=resolved.item.title,
-                    item_kind="contract",
+                    item_kind="completion_gate",
                     rule=rule,
                     machine_config=machine_config,
                     user_root=user_root,
@@ -611,11 +580,11 @@ def evaluate_policy_rule(
         missing = [item for item in required if item not in resolution.enabled_skills]
         compliant = not missing
         detail = "all required skills are active" if compliant else f"missing required skills: {', '.join(missing)}"
-    elif rule_name == "required_contract_ids":
-        required = [str(item) for item in rule.get("contract_ids", [])]
-        missing = [item for item in required if item not in resolution.active_contracts]
+    elif rule_name == "required_completion_gate_ids":
+        required = [str(item) for item in rule.get("completion_gate_ids", [])]
+        missing = [item for item in required if item not in resolution.active_completion_gates]
         compliant = not missing
-        detail = "all required contracts are active" if compliant else f"missing required contracts: {', '.join(missing)}"
+        detail = "all required completion gates are active" if compliant else f"missing required completion gates: {', '.join(missing)}"
     elif rule_name == "forbidden_source_patterns":
         patterns = [str(item) for item in rule.get("patterns", [])]
         matches = find_forbidden_source_matches(patterns, resolution)
@@ -643,7 +612,7 @@ def default_policy_remediation(rule_name: str) -> str:
     defaults = {
         "local_user_layer_must_be_git_backed": "move local user layer into a git-backed repo or initialize git at the configured local user layer path",
         "required_skill_ids": "enable the required skills in the appropriate layer config",
-        "required_contract_ids": "enable or require the missing contracts in the appropriate layer config",
+        "required_completion_gate_ids": "enable or require the missing completion gates in the appropriate layer config",
         "forbidden_source_patterns": "remove the matching source or change the corp policy definition",
     }
     return defaults.get(rule_name, "review the corp policy definition")

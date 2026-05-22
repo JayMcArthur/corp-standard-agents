@@ -10,7 +10,7 @@
   - internal tracked `AGENTS.md`
   - client tracked `AGENTS.md`
   - client repo `corp-private` exclusion
-- Confirm source cache and trust metadata behavior still matches the public contract docs
+- Confirm source cache and trust metadata behavior still matches the public specs
 
 ## Publication Hygiene
 
@@ -21,4 +21,4 @@
 
 ## After Publishing
 
-- Verify the published package can run the README example flow from a clean checkout
+- Verify the published package can run the README example playbook from a clean checkout

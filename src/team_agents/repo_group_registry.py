@@ -17,7 +17,7 @@ def register_repo_group(
     disabled_sources: list[str] | None = None,
     optional_policies: list[str] | None = None,
     disabled_optional_policies: list[str] | None = None,
-    docs: list[str] | None = None,
+    contexts: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
     corp_root = corp_root.resolve()
@@ -36,7 +36,7 @@ def register_repo_group(
             disabled_sources=disabled_sources,
             optional_policies=optional_policies,
             disabled_optional_policies=disabled_optional_policies,
-            docs=docs,
+            contexts=contexts,
             recommended_agent_types=recommended_agent_types,
         ),
     )
@@ -53,7 +53,7 @@ def update_repo_group_config(
     disabled_sources: list[str] | None = None,
     optional_policies: list[str] | None = None,
     disabled_optional_policies: list[str] | None = None,
-    docs: list[str] | None = None,
+    contexts: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
     data = read_toml(config_path)
@@ -69,8 +69,8 @@ def update_repo_group_config(
         data["optional_policies"] = optional_policies
     if disabled_optional_policies is not None:
         data["disabled_optional_policies"] = disabled_optional_policies
-    if docs is not None:
-        data["docs"] = docs
+    if contexts is not None:
+        data["contexts"] = contexts
     if recommended_agent_types is not None:
         data["recommended_agent_types"] = recommended_agent_types
     write_toml_document(config_path, data)
@@ -109,7 +109,7 @@ def _repo_group_config_payload(
     disabled_sources: list[str] | None,
     optional_policies: list[str] | None,
     disabled_optional_policies: list[str] | None,
-    docs: list[str] | None,
+    contexts: list[str] | None,
     recommended_agent_types: list[str] | None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {"id": group_id}
@@ -125,8 +125,8 @@ def _repo_group_config_payload(
         payload["optional_policies"] = optional_policies
     if disabled_optional_policies:
         payload["disabled_optional_policies"] = disabled_optional_policies
-    if docs:
-        payload["docs"] = docs
+    if contexts:
+        payload["contexts"] = contexts
     if recommended_agent_types:
         payload["recommended_agent_types"] = recommended_agent_types
     return payload

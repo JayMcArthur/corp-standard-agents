@@ -24,9 +24,9 @@ from team_agents.validation import validate_canonical_id, validate_commit_hash, 
 VALID_KINDS = {
     "skill": "skills",
     "policy": "policies",
-    "doc": "docs",
-    "contract": "contracts",
-    "flow": "flows",
+    "context": "contexts",
+    "completion_gate": "completion_gates",
+    "playbook": "playbooks",
     "pack": "packs",
     "profile": "profiles",
 }
@@ -35,7 +35,6 @@ VALID_SOURCE_TYPES = {"corp", "external", "user"}
 VALID_TRUST_LEVELS = {"unreviewed", "user-trusted", "corp-reviewed", "corp-required"}
 VALID_LIFECYCLE_STATUSES = {"draft", "active", "deprecated", "archived"}
 VALID_REVIEW_STATUSES = {"unreviewed", "reviewed", "approved"}
-VALID_AUTONOMY_LEVELS = {"interactive", "supervised", "background", "autonomous"}
 OVERRIDE_KEYS = {"enabled", "timeout_seconds", "recommended_agent_types", "tags", "source_note"}
 
 
@@ -94,13 +93,7 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
         review_status=parse_review_status(raw.get("review_status"), config_path),
         deprecated_by=_optional_str(raw.get("deprecated_by")),
         sunset_after=_optional_str(raw.get("sunset_after")),
-        autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), config_path),
-        requires_human_approval=_str_list(raw.get("requires_human_approval")),
         stop_conditions=_str_list(raw.get("stop_conditions")),
-        escalation_contact=_optional_str(raw.get("escalation_contact")),
-        allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
-        requires_approval_for=_str_list(raw.get("requires_approval_for")),
-        forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
         intended_consumers=_str_list(raw.get("intended_consumers")),
         context_quality_max_active_items=_optional_int(raw.get("context_quality_max_active_items")),
         enabled_sources=_str_list(raw.get("enabled_sources")),
@@ -112,20 +105,20 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
         optional_policies=_config_list(raw, "policies", "enabled", "optional_policies"),
         disabled_optional_policies=_config_list(raw, "policies", "disabled", "disabled_optional_policies"),
         recommended_policies=_config_list(raw, "policies", "recommended", "recommended_policies"),
-        docs=_config_list(raw, "docs", "enabled", "docs"),
-        disabled_docs=_config_list(raw, "docs", "disabled", "disabled_docs"),
-        recommended_docs=_config_list(raw, "docs", "recommended", "recommended_docs"),
-        required_contracts=_config_list(raw, "contracts", "required", "required_contracts"),
-        optional_contracts=_config_list(raw, "contracts", "enabled", "optional_contracts"),
-        disabled_optional_contracts=_config_list(raw, "contracts", "disabled", "disabled_optional_contracts"),
-        recommended_contracts=_config_list(raw, "contracts", "recommended", "recommended_contracts"),
+        contexts=_config_list(raw, "contexts", "enabled", "contexts"),
+        disabled_contexts=_config_list(raw, "contexts", "disabled", "disabled_contexts"),
+        recommended_contexts=_config_list(raw, "contexts", "recommended", "recommended_contexts"),
+        required_completion_gates=_config_list(raw, "completion_gates", "required", "required_completion_gates"),
+        optional_completion_gates=_config_list(raw, "completion_gates", "enabled", "optional_completion_gates"),
+        disabled_optional_completion_gates=_config_list(raw, "completion_gates", "disabled", "disabled_optional_completion_gates"),
+        recommended_completion_gates=_config_list(raw, "completion_gates", "recommended", "recommended_completion_gates"),
         required_packs=_config_list(raw, "packs", "required", "required_packs"),
         enabled_packs=_config_list(raw, "packs", "enabled", "enabled_packs"),
         disabled_packs=_config_list(raw, "packs", "disabled", "disabled_packs"),
         recommended_packs=_config_list(raw, "packs", "recommended", "recommended_packs"),
-        enabled_flows=_config_list(raw, "flows", "enabled", "enabled_flows"),
-        disabled_flows=_config_list(raw, "flows", "disabled", "disabled_flows"),
-        recommended_flows=_config_list(raw, "flows", "recommended", "recommended_flows"),
+        enabled_playbooks=_config_list(raw, "playbooks", "enabled", "enabled_playbooks"),
+        disabled_playbooks=_config_list(raw, "playbooks", "disabled", "disabled_playbooks"),
+        recommended_playbooks=_config_list(raw, "playbooks", "recommended", "recommended_playbooks"),
         enabled_profiles=_config_list(raw, "profiles", "enabled", "enabled_profiles"),
         disabled_profiles=_config_list(raw, "profiles", "disabled", "disabled_profiles"),
         recommended_profiles=_config_list(raw, "profiles", "recommended", "recommended_profiles"),
@@ -142,7 +135,7 @@ def load_layer(path: Path, layer_name: str, source_type: str) -> LayerData:
         repo_class=raw.get("repo_class"),
         minimal_enabled_skills=_str_list(raw.get("minimal_enabled_skills")),
         minimal_optional_policies=_str_list(raw.get("minimal_optional_policies")),
-        minimal_docs=_str_list(raw.get("minimal_docs")),
+        minimal_contexts=_str_list(raw.get("minimal_contexts")),
         protected_fields=set(_str_list(raw.get("protected_fields"))),
     )
     apply_generalized_activation(config, raw, config_path)
@@ -172,13 +165,7 @@ def load_profile_configs(layer_root: Path) -> dict[str, LayerConfig]:
             review_status=parse_review_status(raw.get("review_status"), profile_path),
             deprecated_by=_optional_str(raw.get("deprecated_by")),
             sunset_after=_optional_str(raw.get("sunset_after")),
-            autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), profile_path),
-            requires_human_approval=_str_list(raw.get("requires_human_approval")),
             stop_conditions=_str_list(raw.get("stop_conditions")),
-            escalation_contact=_optional_str(raw.get("escalation_contact")),
-            allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
-            requires_approval_for=_str_list(raw.get("requires_approval_for")),
-            forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
             intended_consumers=_str_list(raw.get("intended_consumers")),
             context_quality_max_active_items=_optional_int(raw.get("context_quality_max_active_items")),
             enabled_skills=_config_list(raw, "skills", "enabled", "enabled_skills"),
@@ -188,20 +175,20 @@ def load_profile_configs(layer_root: Path) -> dict[str, LayerConfig]:
             optional_policies=_config_list(raw, "policies", "enabled", "optional_policies"),
             disabled_optional_policies=_config_list(raw, "policies", "disabled", "disabled_optional_policies"),
             recommended_policies=_config_list(raw, "policies", "recommended", "recommended_policies"),
-            docs=_config_list(raw, "docs", "enabled", "docs"),
-            disabled_docs=_config_list(raw, "docs", "disabled", "disabled_docs"),
-            recommended_docs=_config_list(raw, "docs", "recommended", "recommended_docs"),
-            required_contracts=_config_list(raw, "contracts", "required", "required_contracts"),
-            optional_contracts=_config_list(raw, "contracts", "enabled", "optional_contracts"),
-            disabled_optional_contracts=_config_list(raw, "contracts", "disabled", "disabled_optional_contracts"),
-            recommended_contracts=_config_list(raw, "contracts", "recommended", "recommended_contracts"),
+            contexts=_config_list(raw, "contexts", "enabled", "contexts"),
+            disabled_contexts=_config_list(raw, "contexts", "disabled", "disabled_contexts"),
+            recommended_contexts=_config_list(raw, "contexts", "recommended", "recommended_contexts"),
+            required_completion_gates=_config_list(raw, "completion_gates", "required", "required_completion_gates"),
+            optional_completion_gates=_config_list(raw, "completion_gates", "enabled", "optional_completion_gates"),
+            disabled_optional_completion_gates=_config_list(raw, "completion_gates", "disabled", "disabled_optional_completion_gates"),
+            recommended_completion_gates=_config_list(raw, "completion_gates", "recommended", "recommended_completion_gates"),
             required_packs=_config_list(raw, "packs", "required", "required_packs"),
             enabled_packs=_config_list(raw, "packs", "enabled", "enabled_packs"),
             disabled_packs=_config_list(raw, "packs", "disabled", "disabled_packs"),
             recommended_packs=_config_list(raw, "packs", "recommended", "recommended_packs"),
-            enabled_flows=_config_list(raw, "flows", "enabled", "enabled_flows"),
-            disabled_flows=_config_list(raw, "flows", "disabled", "disabled_flows"),
-            recommended_flows=_config_list(raw, "flows", "recommended", "recommended_flows"),
+            enabled_playbooks=_config_list(raw, "playbooks", "enabled", "enabled_playbooks"),
+            disabled_playbooks=_config_list(raw, "playbooks", "disabled", "disabled_playbooks"),
+            recommended_playbooks=_config_list(raw, "playbooks", "recommended", "recommended_playbooks"),
             enabled_profiles=_config_list(raw, "profiles", "enabled", "enabled_profiles"),
             disabled_profiles=_config_list(raw, "profiles", "disabled", "disabled_profiles"),
             recommended_profiles=_config_list(raw, "profiles", "recommended", "recommended_profiles"),
@@ -240,34 +227,34 @@ def add_activation_id(config: LayerConfig, item_id: str, mode: str, config_path:
     field_by_mode = {
         "required": {
             "policy": "baseline_policies",
-            "contract": "required_contracts",
+            "completion_gate": "required_completion_gates",
             "pack": "required_packs",
         },
         "enabled": {
             "skill": "enabled_skills",
             "policy": "optional_policies",
-            "doc": "docs",
-            "contract": "optional_contracts",
+            "context": "contexts",
+            "completion_gate": "optional_completion_gates",
             "pack": "enabled_packs",
-            "flow": "enabled_flows",
+            "playbook": "enabled_playbooks",
             "profile": "enabled_profiles",
         },
         "disabled": {
             "skill": "disabled_skills",
             "policy": "disabled_optional_policies",
-            "doc": "disabled_docs",
-            "contract": "disabled_optional_contracts",
+            "context": "disabled_contexts",
+            "completion_gate": "disabled_optional_completion_gates",
             "pack": "disabled_packs",
-            "flow": "disabled_flows",
+            "playbook": "disabled_playbooks",
             "profile": "disabled_profiles",
         },
         "recommended": {
             "skill": "recommended_skills",
             "policy": "recommended_policies",
-            "doc": "recommended_docs",
-            "contract": "recommended_contracts",
+            "context": "recommended_contexts",
+            "completion_gate": "recommended_completion_gates",
             "pack": "recommended_packs",
-            "flow": "recommended_flows",
+            "playbook": "recommended_playbooks",
             "profile": "recommended_profiles",
         },
     }
@@ -351,13 +338,7 @@ def load_item(item_dir: Path, expected_kind: str, source_type: str, source_names
         review_status=parse_review_status(raw.get("review_status"), item_path),
         deprecated_by=_optional_str(raw.get("deprecated_by")),
         sunset_after=_optional_str(raw.get("sunset_after")),
-        autonomy_level=parse_autonomy_level(raw.get("autonomy_level"), item_path),
-        requires_human_approval=_str_list(raw.get("requires_human_approval")),
         stop_conditions=_str_list(raw.get("stop_conditions")),
-        escalation_contact=_optional_str(raw.get("escalation_contact")),
-        allowed_tool_classes=_str_list(raw.get("allowed_tool_classes")),
-        requires_approval_for=_str_list(raw.get("requires_approval_for")),
-        forbidden_tool_classes=_str_list(raw.get("forbidden_tool_classes")),
         tags=_str_list(raw.get("tags")),
         recommended_agent_types=_str_list(raw.get("recommended_agent_types")),
         timeout_seconds=_optional_int(raw.get("timeout_seconds")),
@@ -417,13 +398,6 @@ def parse_review_status(value: Any, item_path: Path) -> str:
     return status
 
 
-def parse_autonomy_level(value: Any, item_path: Path) -> str:
-    level = str(value or "interactive")
-    if level not in VALID_AUTONOMY_LEVELS:
-        raise ValidationError(f"Invalid autonomy_level {level!r} in {item_path}")
-    return level
-
-
 def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
@@ -449,16 +423,16 @@ def parse_promotion_checklist(value: Any, kind: str, item_path: Path) -> dict[st
 def parse_evidence_required(value: Any, kind: str, item_path: Path) -> list[str]:
     if value is None:
         return []
-    if kind not in {"contract", "flow"}:
-        raise ValidationError(f"evidence_required is only supported for contract and flow items: {item_path}")
+    if kind not in {"completion_gate", "playbook"}:
+        raise ValidationError(f"evidence_required is only supported for completion gate and playbook items: {item_path}")
     return _str_list(value)
 
 
 def parse_flow_list(value: Any, kind: str, field_name: str, item_path: Path) -> list[str]:
     if value is None:
         return []
-    if kind != "flow":
-        raise ValidationError(f"{field_name} is only supported for flow items: {item_path}")
+    if kind != "playbook":
+        raise ValidationError(f"{field_name} is only supported for playbook items: {item_path}")
     return _str_list(value)
 
 
@@ -480,7 +454,7 @@ def parse_pack_item_activation(raw: dict[str, Any], kind: str, item_path: Path) 
             _, _, ref_kind, _ = validate_canonical_id(item_id, path=item_path)
             if ref_kind == "profile":
                 raise ValidationError(f"Pack activation.{mode} cannot reference profile items in {item_path}: {item_id}")
-            if mode == "required" and ref_kind not in {"policy", "contract", "pack"}:
+            if mode == "required" and ref_kind not in {"policy", "completion_gate", "pack"}:
                 raise ValidationError(f"Pack activation.required does not support {ref_kind} items in {item_path}: {item_id}")
     return required, enabled
 

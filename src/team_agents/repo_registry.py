@@ -16,7 +16,7 @@ def register_repo(
     repo_group_id: str | None = None,
     enabled_skills: list[str] | None = None,
     optional_policies: list[str] | None = None,
-    docs: list[str] | None = None,
+    contexts: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
     corp_root = corp_root.resolve()
@@ -41,7 +41,7 @@ def register_repo(
             repo_group_id=repo_group_id,
             enabled_skills=enabled_skills,
             optional_policies=optional_policies,
-            docs=docs,
+            contexts=contexts,
             recommended_agent_types=recommended_agent_types,
         ),
         encoding="utf-8",
@@ -62,7 +62,7 @@ def update_repo_config(
     enabled_skills: list[str] | None = None,
     optional_policies: list[str] | None = None,
     disabled_optional_policies: list[str] | None = None,
-    docs: list[str] | None = None,
+    contexts: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> Path:
     data = read_toml(config_path)
@@ -84,8 +84,8 @@ def update_repo_config(
         data["optional_policies"] = optional_policies
     if disabled_optional_policies is not None:
         data["disabled_optional_policies"] = disabled_optional_policies
-    if docs is not None:
-        data["docs"] = docs
+    if contexts is not None:
+        data["contexts"] = contexts
     if recommended_agent_types is not None:
         data["recommended_agent_types"] = recommended_agent_types
     write_toml_document(config_path, data)
@@ -122,7 +122,7 @@ def _render_repo_config(
     repo_group_id: str | None = None,
     enabled_skills: list[str] | None = None,
     optional_policies: list[str] | None = None,
-    docs: list[str] | None = None,
+    contexts: list[str] | None = None,
     recommended_agent_types: list[str] | None = None,
 ) -> str:
     lines = [
@@ -139,8 +139,8 @@ def _render_repo_config(
         lines.append(_render_string_list("enabled_skills", enabled_skills))
     if optional_policies:
         lines.append(_render_string_list("optional_policies", optional_policies))
-    if docs:
-        lines.append(_render_string_list("docs", docs))
+    if contexts:
+        lines.append(_render_string_list("contexts", contexts))
     if recommended_agent_types:
         lines.append(_render_string_list("recommended_agent_types", recommended_agent_types))
     lines.append("")

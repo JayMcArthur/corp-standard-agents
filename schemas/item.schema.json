@@ -8,11 +8,11 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(skill|policy|doc|contract|flow|pack|profile)\\.([a-z0-9][a-z0-9_-]*)$"
+      "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(skill|policy|context|completion_gate|playbook|pack|profile)\\.([a-z0-9][a-z0-9_-]*)$"
     },
     "kind": {
       "type": "string",
-      "enum": ["skill", "policy", "doc", "contract", "flow", "pack", "profile"]
+      "enum": ["skill", "policy", "context", "completion_gate", "playbook", "pack", "profile"]
     },
     "title": {
       "type": "string",
@@ -46,43 +46,7 @@
       "type": "string",
       "minLength": 1
     },
-    "autonomy_level": {
-      "type": "string",
-      "enum": ["interactive", "supervised", "background", "autonomous"]
-    },
-    "requires_human_approval": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
     "stop_conditions": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "escalation_contact": {
-      "type": "string",
-      "minLength": 1
-    },
-    "allowed_tool_classes": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "requires_approval_for": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "forbidden_tool_classes": {
       "type": "array",
       "items": {
         "type": "string",
@@ -227,7 +191,7 @@
             "enum": [
               "local_user_layer_must_be_git_backed",
               "required_skill_ids",
-              "required_contract_ids",
+              "required_completion_gate_ids",
               "forbidden_source_patterns"
             ]
           },
@@ -246,7 +210,7 @@
               "minLength": 1
             }
           },
-          "contract_ids": {
+          "completion_gate_ids": {
             "type": "array",
             "items": {
               "type": "string",
@@ -278,14 +242,14 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(policy|contract|pack)\\.([a-z0-9][a-z0-9_-]*)$"
+            "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(policy|completion_gate|pack)\\.([a-z0-9][a-z0-9_-]*)$"
           }
         },
         "enabled": {
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(skill|policy|doc|contract|flow|pack)\\.([a-z0-9][a-z0-9_-]*)$"
+            "pattern": "^(corp|external|user)\\.([a-z0-9][a-z0-9_-]*)\\.(skill|policy|context|completion_gate|playbook|pack)\\.([a-z0-9][a-z0-9_-]*)$"
           }
         }
       }

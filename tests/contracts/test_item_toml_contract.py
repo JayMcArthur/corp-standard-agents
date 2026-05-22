@@ -23,7 +23,7 @@ class ItemTomlContractTests(unittest.TestCase):
         self.assertEqual(schema["required"], ["id", "kind", "title", "privacy"])
         self.assertEqual(
             schema["properties"]["kind"]["enum"],
-            ["skill", "policy", "doc", "contract", "flow", "pack", "profile"],
+            ["skill", "policy", "context", "completion_gate", "playbook", "pack", "profile"],
         )
 
     def test_existing_item_toml_fixtures_validate(self) -> None:

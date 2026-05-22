@@ -27,4 +27,4 @@ test "$(grep -c "<!-- team-agents:start -->" "$WORKSPACES_ROOT/internal-app/AGEN
 test "$(grep -c "# Project Agent Guidance" "$WORKSPACES_ROOT/internal-app/AGENTS.md")" -eq 1
 test "$(grep -c "<!-- team-agents:start -->" "$WORKSPACES_ROOT/internal-app/CLAUDE.md")" -eq 1
 
-echo "example flow ok"
+echo "example playbook ok"

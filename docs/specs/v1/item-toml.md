@@ -11,7 +11,7 @@ It applies to every item kind:
 
 - `skill`
 - `policy`
-- `doc`
+- `context`
 
 The canonical machine-readable schema lives at [src/team_agents/schemas/item-toml-v1.schema.json](/home/jay/dev/Tools/corporate_standardized_agents/src/team_agents/schemas/item-toml-v1.schema.json:1).
 
@@ -20,7 +20,7 @@ The canonical machine-readable schema lives at [src/team_agents/schemas/item-tom
 | Field | Type | Rules |
 | --- | --- | --- |
 | `id` | string | Must match canonical id format: `<source-type>.<namespace>.<kind>.<slug>` |
-| `kind` | string | Must be one of `skill`, `policy`, `doc` |
+| `kind` | string | Must be one of `skill`, `policy`, `context` |
 | `title` | string | Non-empty human-readable title |
 | `privacy` | string | Must be `corp-private` or `repo-safe` |
 

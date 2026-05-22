@@ -8,7 +8,7 @@ BOOTSTRAP_TAGS = {"bootstrap", "repo-bootstrap", "minimal-verification"}
 
 def is_bootstrap_guidance(resolved: ResolvedItem) -> bool:
     item = resolved.item
-    if item.kind not in {"contract", "flow", "doc"}:
+    if item.kind not in {"completion_gate", "playbook", "context"}:
         return False
     tags = {tag.lower() for tag in item.tags}
     if tags & BOOTSTRAP_TAGS:
@@ -18,7 +18,7 @@ def is_bootstrap_guidance(resolved: ResolvedItem) -> bool:
 
 
 def bootstrap_guidance_items(result: ResolutionResult) -> list[ResolvedItem]:
-    active_ids = set(result.active_contracts + result.active_flows + result.active_docs)
+    active_ids = set(result.active_completion_gates + result.active_playbooks + result.active_contexts)
     return [
         resolved
         for item_id, resolved in sorted(result.items.items())

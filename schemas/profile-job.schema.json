@@ -24,43 +24,7 @@
       "type": "string",
       "enum": ["unreviewed", "reviewed", "approved"]
     },
-    "autonomy_level": {
-      "type": "string",
-      "enum": ["interactive", "supervised", "background", "autonomous"]
-    },
-    "requires_human_approval": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
     "stop_conditions": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "escalation_contact": {
-      "type": "string",
-      "minLength": 1
-    },
-    "allowed_tool_classes": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "requires_approval_for": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "forbidden_tool_classes": {
       "type": "array",
       "items": {
         "type": "string",
@@ -71,7 +35,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["human", "cursor", "claude", "codex", "harness", "agent-os", "workflow-engine", "ci-governance"]
+        "enum": ["human", "cursor", "claude", "codex", "harness", "workflow-engine", "ci-governance"]
       }
     },
     "skills": {
@@ -80,16 +44,16 @@
     "policies": {
       "$ref": "activation.schema.json"
     },
-    "docs": {
+    "contexts": {
       "$ref": "activation.schema.json"
     },
-    "contracts": {
+    "completion_gates": {
       "$ref": "activation.schema.json"
     },
     "packs": {
       "$ref": "activation.schema.json"
     },
-    "flows": {
+    "playbooks": {
       "$ref": "activation.schema.json"
     },
     "profiles": {

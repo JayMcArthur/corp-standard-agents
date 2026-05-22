@@ -8,7 +8,7 @@ enabled_skills = [
   "corp.shadowknight.skill.internal-ops"
 ]
 optional_policies = ["external.shared.policy.ext-policy"]
-docs = ["corp.shadowknight.doc.internal-runbook"]
+contexts = ["corp.shadowknight.context.internal-runbook"]
 
 [[item_override]]
 id = "external.shared.skill.ext-lint"

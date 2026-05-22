@@ -1,5 +1,5 @@
 id = "platform"
 enabled_skills = ["corp.shadowknight.skill.platform-shared"]
-docs = ["corp.shadowknight.doc.platform-map"]
+contexts = ["corp.shadowknight.context.platform-map"]
 recommended_agent_types = ["planner"]
 

@@ -19,7 +19,7 @@ team-agents context --workspace . --json
 - `status`: `ok` or `fail`
 - `strict`: whether warning-strict mode was requested
 - `workspace`: resolved workspace path
-- `errors`: schema, loading, resolution, doctor, policy, or contract failures
+- `errors`: schema, loading, resolution, doctor, policy, or completion gate failures
 - `warnings`: governance warnings from doctor checks and resolution warnings
 - `strict_failure`: true when `--strict` turned warnings into a failure
 - `resolution`: matched repo, repo group, profile, repo class, and resolution warnings when resolution succeeds

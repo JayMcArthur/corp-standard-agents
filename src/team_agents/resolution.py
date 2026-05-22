@@ -90,17 +90,17 @@ def resolve_workspace(
     resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
     enabled_skills, skill_activations = merge_set_fields(activation_layers, "enabled_skills", "disabled_skills")
     optional_policies, policy_activations = merge_set_fields(activation_layers, "optional_policies", "disabled_optional_policies")
-    docs, doc_activations = merge_set_fields(activation_layers, "docs", "disabled_docs")
-    optional_contracts, contract_activations = merge_set_fields(
-        activation_layers, "optional_contracts", "disabled_optional_contracts"
+    contexts, context_activations = merge_set_fields(activation_layers, "contexts", "disabled_contexts")
+    optional_completion_gates, completion_gate_activations = merge_set_fields(
+        activation_layers, "optional_completion_gates", "disabled_optional_completion_gates"
     )
     enabled_packs, pack_activations = merge_set_fields(activation_layers, "enabled_packs", "disabled_packs")
-    enabled_flows, flow_activations = merge_set_fields(activation_layers, "enabled_flows", "disabled_flows")
+    enabled_playbooks, playbook_activations = merge_set_fields(activation_layers, "enabled_playbooks", "disabled_playbooks")
     enabled_profiles, profile_activations = merge_set_fields(activation_layers, "enabled_profiles", "disabled_profiles")
     baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
     baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
-    required_contracts = merge_required_field(activation_layers, "required_contracts")
-    required_contract_activations = activation_map_for_required(activation_layers, "required_contracts")
+    required_completion_gates = merge_required_field(activation_layers, "required_completion_gates")
+    required_completion_gate_activations = activation_map_for_required(activation_layers, "required_completion_gates")
     required_packs = merge_required_field(activation_layers, "required_packs")
     required_pack_activations = activation_map_for_required(activation_layers, "required_packs")
     if context.is_unknown:
@@ -109,10 +109,10 @@ def resolve_workspace(
         optional_policies = (set(corp.org.config.minimal_optional_policies) | set(user_layer.optional_policies)) - set(
             user_layer.disabled_optional_policies
         )
-        docs = (set(corp.org.config.minimal_docs) | set(user_layer.docs)) - set(user_layer.disabled_docs)
-        optional_contracts = set(user_layer.optional_contracts) - set(user_layer.disabled_optional_contracts)
+        contexts = (set(corp.org.config.minimal_contexts) | set(user_layer.contexts)) - set(user_layer.disabled_contexts)
+        optional_completion_gates = set(user_layer.optional_completion_gates) - set(user_layer.disabled_optional_completion_gates)
         enabled_packs = set(user_layer.enabled_packs) - set(user_layer.disabled_packs)
-        enabled_flows = set(user_layer.enabled_flows) - set(user_layer.disabled_flows)
+        enabled_playbooks = set(user_layer.enabled_playbooks) - set(user_layer.disabled_playbooks)
         enabled_profiles = set(user_layer.enabled_profiles) - set(user_layer.disabled_profiles)
         skill_activations = activation_map_for_unknown(
             corp.org.config.minimal_enabled_skills,
@@ -128,17 +128,17 @@ def resolve_workspace(
             corp.org.config,
             user_layer,
         )
-        doc_activations = activation_map_for_unknown(
-            corp.org.config.minimal_docs,
-            user_layer.docs,
-            user_layer.disabled_docs,
+        context_activations = activation_map_for_unknown(
+            corp.org.config.minimal_contexts,
+            user_layer.contexts,
+            user_layer.disabled_contexts,
             corp.org.config,
             user_layer,
         )
-        contract_activations = activation_map_for_unknown(
+        completion_gate_activations = activation_map_for_unknown(
             [],
-            user_layer.optional_contracts,
-            user_layer.disabled_optional_contracts,
+            user_layer.optional_completion_gates,
+            user_layer.disabled_optional_completion_gates,
             corp.org.config,
             user_layer,
         )
@@ -149,10 +149,10 @@ def resolve_workspace(
             corp.org.config,
             user_layer,
         )
-        flow_activations = activation_map_for_unknown(
+        playbook_activations = activation_map_for_unknown(
             [],
-            user_layer.enabled_flows,
-            user_layer.disabled_flows,
+            user_layer.enabled_playbooks,
+            user_layer.disabled_playbooks,
             corp.org.config,
             user_layer,
         )
@@ -169,8 +169,8 @@ def resolve_workspace(
             if item_id in context.binding_disabled_skills:
                 skill_activations.pop(item_id, None)
     active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
-    active_contract_ids = required_contracts + [
-        item_id for item_id in optional_contracts if item_id not in required_contracts
+    active_completion_gate_ids = required_completion_gates + [
+        item_id for item_id in optional_completion_gates if item_id not in required_completion_gates
     ]
     active_pack_ids = required_packs + [item_id for item_id in enabled_packs if item_id not in required_packs]
     pack_expansion_activations: dict[str, list[str]] = {}
@@ -180,16 +180,16 @@ def resolve_workspace(
         pack_expansion = expand_pack_contents(active_pack_ids, resolved_items, pack_source_activations)
         enabled_skills.update(pack_expansion["enabled_skills"])
         optional_policies.update(pack_expansion["optional_policies"])
-        docs.update(pack_expansion["docs"])
-        optional_contracts.update(pack_expansion["optional_contracts"])
+        contexts.update(pack_expansion["contexts"])
+        optional_completion_gates.update(pack_expansion["optional_completion_gates"])
         enabled_packs.update(pack_expansion["enabled_packs"])
-        enabled_flows.update(pack_expansion["enabled_flows"])
+        enabled_playbooks.update(pack_expansion["enabled_playbooks"])
         for item_id in pack_expansion["baseline_policies"]:
             if item_id not in active_policy_ids:
                 active_policy_ids.append(item_id)
-        for item_id in pack_expansion["required_contracts"]:
-            if item_id not in active_contract_ids:
-                active_contract_ids.append(item_id)
+        for item_id in pack_expansion["required_completion_gates"]:
+            if item_id not in active_completion_gate_ids:
+                active_completion_gate_ids.append(item_id)
         for item_id in pack_expansion["required_packs"]:
             if item_id not in active_pack_ids:
                 active_pack_ids.append(item_id)
@@ -201,22 +201,22 @@ def resolve_workspace(
     for item_id in optional_policies:
         if item_id not in active_policy_ids:
             active_policy_ids.append(item_id)
-    for item_id in optional_contracts:
-        if item_id not in active_contract_ids:
-            active_contract_ids.append(item_id)
+    for item_id in optional_completion_gates:
+        if item_id not in active_completion_gate_ids:
+            active_completion_gate_ids.append(item_id)
     for item_id in enabled_packs:
         if item_id not in active_pack_ids:
             active_pack_ids.append(item_id)
     activation_reasons: dict[str, str] = {}
-    for item_id in set(baseline_policies) | set(required_contracts) | set(required_packs) | pack_required_items:
+    for item_id in set(baseline_policies) | set(required_completion_gates) | set(required_packs) | pack_required_items:
         activation_reasons[item_id] = "required"
     for item_id in (
         set(enabled_skills)
         | set(optional_policies)
-        | set(docs)
-        | set(optional_contracts)
+        | set(contexts)
+        | set(optional_completion_gates)
         | set(enabled_packs)
-        | set(enabled_flows)
+        | set(enabled_playbooks)
         | set(enabled_profiles)
     ):
         activation_reasons.setdefault(item_id, "enabled")
@@ -225,23 +225,23 @@ def resolve_workspace(
     active_ids = (
         set(enabled_skills)
         | set(active_policy_ids)
-        | set(docs)
-        | set(active_contract_ids)
+        | set(contexts)
+        | set(active_completion_gate_ids)
         | set(active_pack_ids)
-        | set(enabled_flows)
+        | set(enabled_playbooks)
         | set(enabled_profiles)
     )
     activation_map: dict[str, list[str]] = {}
     for mapping in [
         skill_activations,
         policy_activations,
-        doc_activations,
-        contract_activations,
+        context_activations,
+        completion_gate_activations,
         pack_activations,
-        flow_activations,
+        playbook_activations,
         profile_activations,
         baseline_policy_activations,
-        required_contract_activations,
+        required_completion_gate_activations,
         required_pack_activations,
         pack_expansion_activations,
     ]:
@@ -267,7 +267,7 @@ def resolve_workspace(
             context,
             resolved,
             item_id in baseline_policies
-            or item_id in required_contracts
+            or item_id in required_completion_gates
             or item_id in required_packs
             or item_id in pack_required_items,
         )
@@ -285,11 +285,11 @@ def resolve_workspace(
         if item_id not in active_ids and resolved.denied_reason:
             denied_items[item_id] = resolved
     if any(
-        override.item_id in set(corp.org.config.baseline_policies + corp.org.config.required_contracts + corp.org.config.required_packs)
+        override.item_id in set(corp.org.config.baseline_policies + corp.org.config.required_completion_gates + corp.org.config.required_packs)
         and override.enabled is False
         for override in user.layer.config.item_overrides
     ):
-        raise ResolutionError("User layers may not disable required policies, contracts, or packs")
+        raise ResolutionError("User layers may not disable required policies, completion gates, or packs")
     if any(
         field in user.layer.config.protected_fields
         for field in corp.org.config.protected_fields
@@ -308,10 +308,10 @@ def resolve_workspace(
         source_details=source_details,
         enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
         active_policies=sorted(item_id for item_id in active_policy_ids if item_id in active_items),
-        active_docs=sorted(item_id for item_id in docs if item_id in active_items),
-        active_contracts=sorted(item_id for item_id in active_contract_ids if item_id in active_items),
+        active_contexts=sorted(item_id for item_id in contexts if item_id in active_items),
+        active_completion_gates=sorted(item_id for item_id in active_completion_gate_ids if item_id in active_items),
         active_packs=sorted(item_id for item_id in active_pack_ids if item_id in active_items),
-        active_flows=sorted(item_id for item_id in enabled_flows if item_id in active_items),
+        active_playbooks=sorted(item_id for item_id in enabled_playbooks if item_id in active_items),
         active_profiles=sorted(item_id for item_id in enabled_profiles if item_id in active_items),
         recommended_items=sorted(item_id for item_id in recommended_items if item_id in resolved_items and item_id not in active_items),
         recommended_agent_types=recommended_agent_types,
@@ -341,22 +341,22 @@ def resolve_user_global(
     resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
     enabled_skills, skill_activations = merge_set_fields(activation_layers, "enabled_skills", "disabled_skills")
     optional_policies, policy_activations = merge_set_fields(activation_layers, "optional_policies", "disabled_optional_policies")
-    docs, doc_activations = merge_set_fields(activation_layers, "docs", "disabled_docs")
-    optional_contracts, contract_activations = merge_set_fields(
-        activation_layers, "optional_contracts", "disabled_optional_contracts"
+    contexts, context_activations = merge_set_fields(activation_layers, "contexts", "disabled_contexts")
+    optional_completion_gates, completion_gate_activations = merge_set_fields(
+        activation_layers, "optional_completion_gates", "disabled_optional_completion_gates"
     )
     enabled_packs, pack_activations = merge_set_fields(activation_layers, "enabled_packs", "disabled_packs")
-    enabled_flows, flow_activations = merge_set_fields(activation_layers, "enabled_flows", "disabled_flows")
+    enabled_playbooks, playbook_activations = merge_set_fields(activation_layers, "enabled_playbooks", "disabled_playbooks")
     enabled_profiles, profile_activations = merge_set_fields(activation_layers, "enabled_profiles", "disabled_profiles")
     baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
     baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
-    required_contracts = merge_required_field(activation_layers, "required_contracts")
-    required_contract_activations = activation_map_for_required(activation_layers, "required_contracts")
+    required_completion_gates = merge_required_field(activation_layers, "required_completion_gates")
+    required_completion_gate_activations = activation_map_for_required(activation_layers, "required_completion_gates")
     required_packs = merge_required_field(activation_layers, "required_packs")
     required_pack_activations = activation_map_for_required(activation_layers, "required_packs")
     active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
-    active_contract_ids = required_contracts + [
-        item_id for item_id in optional_contracts if item_id not in required_contracts
+    active_completion_gate_ids = required_completion_gates + [
+        item_id for item_id in optional_completion_gates if item_id not in required_completion_gates
     ]
     active_pack_ids = required_packs + [item_id for item_id in enabled_packs if item_id not in required_packs]
     pack_expansion_activations: dict[str, list[str]] = {}
@@ -366,16 +366,16 @@ def resolve_user_global(
         pack_expansion = expand_pack_contents(active_pack_ids, resolved_items, pack_source_activations)
         enabled_skills.update(pack_expansion["enabled_skills"])
         optional_policies.update(pack_expansion["optional_policies"])
-        docs.update(pack_expansion["docs"])
-        optional_contracts.update(pack_expansion["optional_contracts"])
+        contexts.update(pack_expansion["contexts"])
+        optional_completion_gates.update(pack_expansion["optional_completion_gates"])
         enabled_packs.update(pack_expansion["enabled_packs"])
-        enabled_flows.update(pack_expansion["enabled_flows"])
+        enabled_playbooks.update(pack_expansion["enabled_playbooks"])
         for item_id in pack_expansion["baseline_policies"]:
             if item_id not in active_policy_ids:
                 active_policy_ids.append(item_id)
-        for item_id in pack_expansion["required_contracts"]:
-            if item_id not in active_contract_ids:
-                active_contract_ids.append(item_id)
+        for item_id in pack_expansion["required_completion_gates"]:
+            if item_id not in active_completion_gate_ids:
+                active_completion_gate_ids.append(item_id)
         for item_id in pack_expansion["required_packs"]:
             if item_id not in active_pack_ids:
                 active_pack_ids.append(item_id)
@@ -387,22 +387,22 @@ def resolve_user_global(
     for item_id in optional_policies:
         if item_id not in active_policy_ids:
             active_policy_ids.append(item_id)
-    for item_id in optional_contracts:
-        if item_id not in active_contract_ids:
-            active_contract_ids.append(item_id)
+    for item_id in optional_completion_gates:
+        if item_id not in active_completion_gate_ids:
+            active_completion_gate_ids.append(item_id)
     for item_id in enabled_packs:
         if item_id not in active_pack_ids:
             active_pack_ids.append(item_id)
     activation_reasons: dict[str, str] = {}
-    for item_id in set(baseline_policies) | set(required_contracts) | set(required_packs) | pack_required_items:
+    for item_id in set(baseline_policies) | set(required_completion_gates) | set(required_packs) | pack_required_items:
         activation_reasons[item_id] = "required"
     for item_id in (
         set(enabled_skills)
         | set(optional_policies)
-        | set(docs)
-        | set(optional_contracts)
+        | set(contexts)
+        | set(optional_completion_gates)
         | set(enabled_packs)
-        | set(enabled_flows)
+        | set(enabled_playbooks)
         | set(enabled_profiles)
     ):
         activation_reasons.setdefault(item_id, "enabled")
@@ -411,23 +411,23 @@ def resolve_user_global(
     active_ids = (
         set(enabled_skills)
         | set(active_policy_ids)
-        | set(docs)
-        | set(active_contract_ids)
+        | set(contexts)
+        | set(active_completion_gate_ids)
         | set(active_pack_ids)
-        | set(enabled_flows)
+        | set(enabled_playbooks)
         | set(enabled_profiles)
     )
     activation_map: dict[str, list[str]] = {}
     for mapping in [
         skill_activations,
         policy_activations,
-        doc_activations,
-        contract_activations,
+        context_activations,
+        completion_gate_activations,
         pack_activations,
-        flow_activations,
+        playbook_activations,
         profile_activations,
         baseline_policy_activations,
-        required_contract_activations,
+        required_completion_gate_activations,
         required_pack_activations,
         pack_expansion_activations,
     ]:
@@ -450,11 +450,11 @@ def resolve_user_global(
         else:
             denied_items[item_id] = resolved
     if any(
-        override.item_id in set(corp.org.config.baseline_policies + corp.org.config.required_contracts + corp.org.config.required_packs)
+        override.item_id in set(corp.org.config.baseline_policies + corp.org.config.required_completion_gates + corp.org.config.required_packs)
         and override.enabled is False
         for override in user.layer.config.item_overrides
     ):
-        raise ResolutionError("User layers may not disable required policies, contracts, or packs")
+        raise ResolutionError("User layers may not disable required policies, completion gates, or packs")
     return ResolutionResult(
         workspace_context=context,
         layer_chain=[layer.config.layer_name for layer in activation_layers],
@@ -466,10 +466,10 @@ def resolve_user_global(
         source_details=source_details,
         enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
         active_policies=sorted(item_id for item_id in active_policy_ids if item_id in active_items),
-        active_docs=sorted(item_id for item_id in docs if item_id in active_items),
-        active_contracts=sorted(item_id for item_id in active_contract_ids if item_id in active_items),
+        active_contexts=sorted(item_id for item_id in contexts if item_id in active_items),
+        active_completion_gates=sorted(item_id for item_id in active_completion_gate_ids if item_id in active_items),
         active_packs=sorted(item_id for item_id in active_pack_ids if item_id in active_items),
-        active_flows=sorted(item_id for item_id in enabled_flows if item_id in active_items),
+        active_playbooks=sorted(item_id for item_id in enabled_playbooks if item_id in active_items),
         active_profiles=sorted(item_id for item_id in enabled_profiles if item_id in active_items),
         recommended_items=sorted(item_id for item_id in recommended_items if item_id in resolved_items and item_id not in active_items),
         recommended_agent_types=recommended_agent_types,
@@ -677,12 +677,12 @@ def expand_pack_contents(
         "enabled_skills": set(),
         "baseline_policies": set(),
         "optional_policies": set(),
-        "docs": set(),
-        "required_contracts": set(),
-        "optional_contracts": set(),
+        "contexts": set(),
+        "required_completion_gates": set(),
+        "optional_completion_gates": set(),
         "required_packs": set(),
         "enabled_packs": set(),
-        "enabled_flows": set(),
+        "enabled_playbooks": set(),
         "active_packs": set(initial_pack_ids),
         "required_items": set(),
         "activations": {},
@@ -709,15 +709,15 @@ def expand_pack_contents(
         _, _, kind, _ = validate_canonical_id(item_id)
         if kind == "profile":
             raise ResolutionError(f"Pack {pack_id} cannot activate profile item {item_id}")
-        if mode == "required" and kind not in {"policy", "contract", "pack"}:
+        if mode == "required" and kind not in {"policy", "completion_gate", "pack"}:
             raise ResolutionError(f"Pack {pack_id} cannot require {kind} item {item_id}")
         field_by_kind = {
             "skill": "enabled_skills",
             "policy": "baseline_policies" if mode == "required" else "optional_policies",
-            "doc": "docs",
-            "contract": "required_contracts" if mode == "required" else "optional_contracts",
+            "context": "contexts",
+            "completion_gate": "required_completion_gates" if mode == "required" else "optional_completion_gates",
             "pack": "required_packs" if mode == "required" else "enabled_packs",
-            "flow": "enabled_flows",
+            "playbook": "enabled_playbooks",
         }
         field = field_by_kind[kind]
         target = expanded[field]
@@ -779,10 +779,10 @@ def merge_recommended_item_ids(layers: list[LayerData]) -> list[str]:
     fields = [
         "recommended_skills",
         "recommended_policies",
-        "recommended_docs",
-        "recommended_contracts",
+        "recommended_contexts",
+        "recommended_completion_gates",
         "recommended_packs",
-        "recommended_flows",
+        "recommended_playbooks",
         "recommended_profiles",
     ]
     values: list[str] = []
@@ -900,7 +900,7 @@ def evaluate_item_eligibility(context: WorkspaceContext, resolved: ResolvedItem,
 def validate_layer_replacement(layer: LayerData, replaced: ResolvedItem, replacement: Item, corp: CorpRepo) -> None:
     if layer.config.layer_name != "user":
         return
-    org_required = set(corp.org.config.baseline_policies + corp.org.config.required_contracts + corp.org.config.required_packs)
+    org_required = set(corp.org.config.baseline_policies + corp.org.config.required_completion_gates + corp.org.config.required_packs)
     if replaced.item.item_id in org_required:
         raise ResolutionError(f"User layer may not replace required item {replaced.item.item_id}")
     if privacy_rank(replacement.privacy) < privacy_rank(replaced.item.privacy):

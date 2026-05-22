@@ -5,11 +5,11 @@ Items are canonical, Git-backed standards units. Each item lives in a folder wit
 Required fields:
 
 - `id`: canonical id, `corp|external|user.<namespace>.<kind>.<slug>`
-- `kind`: `skill`, `policy`, `doc`, `contract`, `flow`, `pack`, or `profile`
+- `kind`: `skill`, `policy`, `context`, `completion_gate`, `playbook`, `pack`, or `profile`
 - `title`: human-readable title
 - `privacy`: `repo-safe` or `corp-private`
 
-Optional fields include tags, recommended agent types, timeout, source note, target-tool settings, policy/contract rules, usage mode, ownership metadata, lifecycle metadata, review/trust metadata, and skill `promotion_checklist` metadata.
+Optional fields include tags, recommended agent types, timeout, source note, target-tool settings, policy/completion_gate rules, usage mode, ownership metadata, lifecycle metadata, review/trust metadata, and skill `promotion_checklist` metadata.
 
 Ownership and lifecycle metadata:
 
@@ -40,7 +40,7 @@ Compatibility metadata:
 
 Resolvers warn on likely mismatches when the active repo/profile context declares languages, frameworks, framework versions, or repo tags. Compatibility warnings do not block activation in v1.
 
-Contract and flow items may define `evidence_required` to make completion proof explicit:
+Completion Gate and playbook items may define `evidence_required` to make completion proof explicit:
 
 ```toml
 evidence_required = [
@@ -51,7 +51,7 @@ evidence_required = [
 ]
 ```
 
-Flow items may also define structured, non-executable boundaries:
+Playbook items may also define structured, non-executable boundaries:
 
 ```toml
 inputs = ["issue", "repo_context"]
@@ -59,7 +59,7 @@ outputs = ["patch", "verification_report"]
 stop_conditions = ["ambiguous_requirement", "security_boundary_unclear"]
 ```
 
-Generated context and audit output surface active contract and flow evidence requirements. Active flows also render their declared inputs, outputs, evidence requirements, and stop conditions. v1 does not automatically execute flows or enforce evidence submission.
+Generated context and audit output surface active completion gate and playbook evidence requirements. Active playbooks also render their declared inputs, outputs, evidence requirements, and stop conditions. v1 does not automatically execute playbooks or enforce evidence submission.
 
 Skill items may define `[promotion_checklist]` before they are promoted into corp or repo baselines:
 
@@ -68,6 +68,6 @@ Skill items may define `[promotion_checklist]` before they are promoted into cor
 - `evidence`: measured or observed evidence that it helps
 - `risks`: ways the skill can hurt or mislead work
 - `scope`: why the skill is not too broad
-- `redundancy`: why existing docs/contracts do not already cover it
+- `redundancy`: why existing contexts/completion gates do not already cover it
 
-Pack items may also define `[activation] required` and `[activation] enabled` to bundle other standards. Pack `required` entries may reference policies, contracts, and packs. Pack `enabled` entries may reference skills, policies, docs, contracts, flows, and packs. The machine-readable schema is `schemas/item.schema.json`.
+Pack items may also define `[activation] required` and `[activation] enabled` to bundle other standards. Pack `required` entries may reference policies, completion gates, and packs. Pack `enabled` entries may reference skills, policies, contexts, completion gates, playbooks, and packs. The machine-readable schema is `schemas/item.schema.json`.

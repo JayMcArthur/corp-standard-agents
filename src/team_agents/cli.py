@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from team_agents.consumer_contexts import build_agent_os_context, build_harness_context, build_workflow_engine_context
+from team_agents.consumer_contexts import build_harness_context, build_workflow_engine_context
 from team_agents.doctor import (
     doctor_json,
     doctor_text,
@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit.set_defaults(func=cmd_audit)
 
     registry = subparsers.add_parser("registry")
-    registry.add_argument("--kind", choices=["skill", "policy", "doc", "contract", "flow", "pack", "profile", "source"])
+    registry.add_argument("--kind", choices=["skill", "policy", "context", "completion_gate", "playbook", "pack", "profile", "source"])
     registry.add_argument("--repo-id")
     registry.add_argument("--profile")
     registry.add_argument("--status")
@@ -120,7 +120,6 @@ def build_parser() -> argparse.ArgumentParser:
     context.add_argument("--workspace", type=Path, default=Path.cwd())
     context.add_argument("--profile")
     context.add_argument("--for-harness", action="store_true")
-    context.add_argument("--for-agent-os", action="store_true")
     context.add_argument("--for-workflow-engine", action="store_true")
     context.add_argument("--json", action="store_true")
     context.add_argument("--pretty", action="store_true")
@@ -161,7 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--repo-group-id")
     onboard.add_argument("--enable-skill", action="append", default=[])
     onboard.add_argument("--enable-policy", action="append", default=[])
-    onboard.add_argument("--enable-doc", action="append", default=[])
+    onboard.add_argument("--enable-context", action="append", default=[])
     onboard.add_argument("--recommended-agent-type", action="append", default=[])
     onboard.add_argument("--no-sync", action="store_true")
     onboard.add_argument("--json", action="store_true")
@@ -178,8 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
     configure_repo.add_argument("--disable-policy", action="append")
     configure_repo.add_argument("--enable-source", action="append")
     configure_repo.add_argument("--disable-source", action="append")
-    configure_repo.add_argument("--enable-doc", action="append")
-    configure_repo.add_argument("--disable-doc", action="append")
+    configure_repo.add_argument("--enable-context", action="append")
+    configure_repo.add_argument("--disable-context", action="append")
     configure_repo.add_argument("--recommended-agent-type", action="append")
     configure_repo.add_argument("--no-sync", action="store_true")
     configure_repo.add_argument("--json", action="store_true")
@@ -195,8 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     configure_group.add_argument("--disable-policy", action="append")
     configure_group.add_argument("--enable-source", action="append")
     configure_group.add_argument("--disable-source", action="append")
-    configure_group.add_argument("--enable-doc", action="append")
-    configure_group.add_argument("--disable-doc", action="append")
+    configure_group.add_argument("--enable-context", action="append")
+    configure_group.add_argument("--disable-context", action="append")
     configure_group.add_argument("--recommended-agent-type", action="append")
     configure_group.add_argument("--no-sync", action="store_true")
     configure_group.add_argument("--json", action="store_true")
@@ -319,7 +318,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             replace_existing=True,
         )
         actions.append(
-            f"bootstrapped {summary['skills']} skills and {summary['docs']} docs from {args.import_skills_from.expanduser().resolve()} into {args.import_skills_to}"
+            f"bootstrapped {summary['skills']} skills and {summary['contexts']} contexts from {args.import_skills_from.expanduser().resolve()} into {args.import_skills_to}"
         )
     for source_args in args.add_and_enable_source or []:
         layer, source_id, url, commit, namespace = source_args
@@ -459,8 +458,8 @@ def cmd_attach_unresolved(
                 disable_policy=None,
                 enable_source=None,
                 disable_source=None,
-                enable_doc=None,
-                disable_doc=None,
+                enable_context=None,
+                disable_context=None,
                 recommended_agent_type=None,
                 no_sync=False,
                 json=False,
@@ -509,7 +508,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"sources: {', '.join(result.enabled_sources) or 'none'}")
     print(f"skills: {', '.join(result.enabled_skills) or 'none'}")
     print(f"policies: {', '.join(result.active_policies) or 'none'}")
-    print(f"docs: {', '.join(result.active_docs) or 'none'}")
+    print(f"contexts: {', '.join(result.active_contexts) or 'none'}")
     print(f"recommended-agent-types: {', '.join(result.recommended_agent_types) or 'none'}")
     if result.denied_items:
         denied = ", ".join(
@@ -550,20 +549,18 @@ def cmd_registry(args: argparse.Namespace) -> int:
 
 
 def cmd_context(args: argparse.Namespace) -> int:
-    consumer_views = [args.for_harness, args.for_agent_os, args.for_workflow_engine]
+    consumer_views = [args.for_harness, args.for_workflow_engine]
     if sum(1 for enabled in consumer_views if enabled) > 1:
         print("team-agents: choose only one consumer view", file=sys.stderr)
         return 2
     result = load_resolution_for_workspace(args.workspace, profile=args.profile)
     if args.for_harness:
         payload = build_harness_context(result)
-    elif args.for_agent_os:
-        payload = build_agent_os_context(result)
     elif args.for_workflow_engine:
         payload = build_workflow_engine_context(result)
     else:
         payload = result.to_dict()
-    if args.for_harness or args.for_agent_os or args.for_workflow_engine:
+    if args.for_harness or args.for_workflow_engine:
         payload["consumer_safety_warnings"] = evaluate_consumer_safety_warnings(result)
     if args.pretty:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -643,7 +640,7 @@ def cmd_init_user_layer(args: argparse.Namespace) -> int:
 def cmd_import_skills(args: argparse.Namespace) -> int:
     dest = args.dest.expanduser().resolve()
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ["skills", "policies", "docs", "sources", "workspaces"]:
+    for name in ["skills", "policies", "contexts", "sources", "workspaces"]:
         (dest / name).mkdir(parents=True, exist_ok=True)
     summary = import_folder_skills(
         source_root=args.source.expanduser().resolve(),
@@ -661,7 +658,7 @@ def cmd_import_skills(args: argparse.Namespace) -> int:
                 "namespace": args.namespace,
                 "mode": "bootstrap-import",
                 "imported_skills": summary["skills"],
-                "imported_docs": summary["docs"],
+                "imported_contexts": summary["contexts"],
                 "include_system": args.include_system,
             },
             indent=2,
@@ -697,7 +694,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     corp = load_corp_repo(machine_config.corp_repo_path)
     workspace = args.workspace.expanduser().resolve()
     normalized_remotes = build_workspace_context_for_onboard(workspace, corp)
-    repo_id, repo_class, repo_group_id, enabled_skills, optional_policies, docs, recommended_agent_types = resolve_onboard_inputs(
+    repo_id, repo_class, repo_group_id, enabled_skills, optional_policies, contexts, recommended_agent_types = resolve_onboard_inputs(
         args=args,
         corp=corp,
         workspace=workspace,
@@ -711,7 +708,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         repo_group_id=repo_group_id,
         enabled_skills=enabled_skills or None,
         optional_policies=optional_policies or None,
-        docs=docs or None,
+        contexts=contexts or None,
         recommended_agent_types=recommended_agent_types or None,
     )
     synced = False
@@ -733,7 +730,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         "config_path": str(config_path),
         "enabled_skills": enabled_skills,
         "optional_policies": optional_policies,
-        "docs": docs,
+        "contexts": contexts,
         "recommended_agent_types": recommended_agent_types,
         "synced": synced,
         "written": written,
@@ -766,7 +763,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     base_disabled_sources: list[str] = []
     base_optional_policies: list[str] = []
     base_disabled_optional_policies: list[str] = []
-    base_docs: list[str] = []
+    base_contexts: list[str] = []
     base_recommended_agent_types: list[str] = []
 
     if context.matched_repo_id:
@@ -786,7 +783,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         base_disabled_sources = list(existing.disabled_sources)
         base_optional_policies = list(existing.optional_policies)
         base_disabled_optional_policies = list(existing.disabled_optional_policies)
-        base_docs = list(existing.docs)
+        base_contexts = list(existing.contexts)
         base_recommended_agent_types = list(existing.recommended_agent_types)
         mode = "updated"
     elif args.repo_id and args.repo_id in corp.repos:
@@ -800,7 +797,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         base_disabled_sources = list(existing.disabled_sources)
         base_optional_policies = list(existing.optional_policies)
         base_disabled_optional_policies = list(existing.disabled_optional_policies)
-        base_docs = list(existing.docs)
+        base_contexts = list(existing.contexts)
         base_recommended_agent_types = list(existing.recommended_agent_types)
         mode = "updated"
     else:
@@ -819,7 +816,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     disabled_optional_policies = merge_delta_values(
         base_disabled_optional_policies, args.disable_policy, args.enable_policy
     )
-    docs = merge_delta_values(base_docs, args.enable_doc, args.disable_doc)
+    contexts = merge_delta_values(base_contexts, args.enable_context, args.disable_context)
     recommended_agent_types = (
         unique_list(args.recommended_agent_type)
         if args.recommended_agent_type is not None
@@ -829,7 +826,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
     disabled_optional_policies = merge_delta_values(
         base_disabled_optional_policies, args.disable_policy, args.enable_policy
     )
-    docs = merge_delta_values(base_docs, args.enable_doc, args.disable_doc)
+    contexts = merge_delta_values(base_contexts, args.enable_context, args.disable_context)
     recommended_agent_types = (
         unique_list(args.recommended_agent_type)
         if args.recommended_agent_type is not None
@@ -861,7 +858,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
             repo_group_id=repo_group_id,
             enabled_skills=enabled_skills or None,
             optional_policies=optional_policies or None,
-            docs=docs or None,
+            contexts=contexts or None,
             recommended_agent_types=recommended_agent_types or None,
         )
         if enabled_sources or disabled_sources or disabled_skills or disabled_optional_policies:
@@ -884,7 +881,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
             disabled_sources=disabled_sources,
             optional_policies=optional_policies,
             disabled_optional_policies=disabled_optional_policies,
-            docs=docs,
+            contexts=contexts,
             recommended_agent_types=recommended_agent_types,
         )
 
@@ -905,7 +902,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         "enabled_skills": resolution.enabled_skills,
         "enabled_sources": resolution.enabled_sources,
         "optional_policies": resolution.active_policies,
-        "docs": resolution.active_docs,
+        "contexts": resolution.active_contexts,
         "recommended_agent_types": resolution.recommended_agent_types,
     }
     local_deltas = {
@@ -915,7 +912,7 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         "disabled_sources": list(repo_layer.disabled_sources),
         "optional_policies": list(repo_layer.optional_policies),
         "disabled_optional_policies": list(repo_layer.disabled_optional_policies),
-        "docs": list(repo_layer.docs),
+        "contexts": list(repo_layer.contexts),
         "recommended_agent_types": list(repo_layer.recommended_agent_types),
     }
 
@@ -957,7 +954,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
     base_disabled_sources: list[str] = []
     base_optional_policies: list[str] = []
     base_disabled_optional_policies: list[str] = []
-    base_docs: list[str] = []
+    base_contexts: list[str] = []
     base_recommended_agent_types: list[str] = []
 
     if mode == "updated":
@@ -968,7 +965,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
         base_disabled_sources = list(existing.disabled_sources)
         base_optional_policies = list(existing.optional_policies)
         base_disabled_optional_policies = list(existing.disabled_optional_policies)
-        base_docs = list(existing.docs)
+        base_contexts = list(existing.contexts)
         base_recommended_agent_types = list(existing.recommended_agent_types)
 
     enabled_skills = merge_delta_values(base_enabled_skills, args.enable_skill, args.disable_skill)
@@ -979,7 +976,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
     disabled_optional_policies = merge_delta_values(
         base_disabled_optional_policies, args.disable_policy, args.enable_policy
     )
-    docs = merge_delta_values(base_docs, args.enable_doc, args.disable_doc)
+    contexts = merge_delta_values(base_contexts, args.enable_context, args.disable_context)
     recommended_agent_types = (
         unique_list(args.recommended_agent_type)
         if args.recommended_agent_type is not None
@@ -1010,7 +1007,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
             disabled_sources=disabled_sources or None,
             optional_policies=optional_policies or None,
             disabled_optional_policies=disabled_optional_policies or None,
-            docs=docs or None,
+            contexts=contexts or None,
             recommended_agent_types=recommended_agent_types or None,
         )
     else:
@@ -1022,7 +1019,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
             disabled_sources=disabled_sources,
             optional_policies=optional_policies,
             disabled_optional_policies=disabled_optional_policies,
-            docs=docs,
+            contexts=contexts,
             recommended_agent_types=recommended_agent_types,
         )
 
@@ -1049,7 +1046,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
         "enabled_skills": resolution.enabled_skills,
         "enabled_sources": resolution.enabled_sources,
         "optional_policies": resolution.active_policies,
-        "docs": resolution.active_docs,
+        "contexts": resolution.active_contexts,
         "recommended_agent_types": resolution.recommended_agent_types,
     }
     local_deltas = {
@@ -1059,7 +1056,7 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
         "disabled_sources": list(group_layer.disabled_sources),
         "optional_policies": list(group_layer.optional_policies),
         "disabled_optional_policies": list(group_layer.disabled_optional_policies),
-        "docs": list(group_layer.docs),
+        "contexts": list(group_layer.contexts),
         "recommended_agent_types": list(group_layer.recommended_agent_types),
     }
     payload = {
@@ -1350,7 +1347,7 @@ def cmd_refresh_personal_skills(args: argparse.Namespace) -> int:
         "source_type": source_type,
         "namespace": namespace,
         "imported_skills": summary["skills"],
-        "imported_docs": summary["docs"],
+        "imported_contexts": summary["contexts"],
         "include_system": args.include_system,
     }
     if args.json:
@@ -1449,9 +1446,9 @@ def doctor_governance_warnings(report: dict[str, object]) -> list[dict[str, str]
     for entry in report.get("policy_compliance", []):
         if isinstance(entry, dict) and not entry.get("compliant", True) and entry.get("severity") == "warn":
             warnings.append({"source": str(entry.get("policy_id", "policy")), "detail": str(entry.get("detail", ""))})
-    for entry in report.get("contract_compliance", []):
+    for entry in report.get("completion_gate_compliance", []):
         if isinstance(entry, dict) and not entry.get("compliant", True) and entry.get("severity") == "warn":
-            warnings.append({"source": str(entry.get("contract_id", "contract")), "detail": str(entry.get("detail", ""))})
+            warnings.append({"source": str(entry.get("item_id", "completion_gate")), "detail": str(entry.get("detail", ""))})
     return warnings
 
 
@@ -1465,9 +1462,9 @@ def doctor_governance_errors(report: dict[str, object]) -> list[dict[str, str]]:
     for entry in report.get("policy_compliance", []):
         if isinstance(entry, dict) and not entry.get("compliant", True) and entry.get("severity") == "fail":
             errors.append({"source": str(entry.get("policy_id", "policy")), "detail": str(entry.get("detail", ""))})
-    for entry in report.get("contract_compliance", []):
+    for entry in report.get("completion_gate_compliance", []):
         if isinstance(entry, dict) and not entry.get("compliant", True) and entry.get("severity") == "fail":
-            errors.append({"source": str(entry.get("contract_id", "contract")), "detail": str(entry.get("detail", ""))})
+            errors.append({"source": str(entry.get("item_id", "completion_gate")), "detail": str(entry.get("detail", ""))})
     return errors
 
 
@@ -1517,9 +1514,6 @@ def build_audit_report(result: ResolutionResult) -> dict[str, object]:
             "review_status": resolved.item.review_status,
             "deprecated_by": resolved.item.deprecated_by,
             "sunset_after": resolved.item.sunset_after,
-            "allowed_tool_classes": resolved.item.allowed_tool_classes,
-            "requires_approval_for": resolved.item.requires_approval_for,
-            "forbidden_tool_classes": resolved.item.forbidden_tool_classes,
             "reviewed_by": resolved.item.reviewed_by,
             "reviewed_at": resolved.item.reviewed_at,
             "applies_to_languages": resolved.item.applies_to_languages,
@@ -1559,7 +1553,7 @@ def build_audit_report(result: ResolutionResult) -> dict[str, object]:
     payload["evidence_requirements"] = {
         item_id: resolved.item.evidence_required
         for item_id, resolved in sorted(result.items.items())
-        if resolved.item.kind in {"contract", "flow"} and resolved.item.evidence_required
+        if resolved.item.kind in {"completion_gate", "playbook"} and resolved.item.evidence_required
     }
     payload["standards_registry"] = build_standards_registry(result)
     payload["sprawl_warnings"] = build_sprawl_warnings(result)
@@ -1638,7 +1632,6 @@ def build_registry_report(
                     "maintainer": profile_config.maintainer,
                     "status": profile_config.lifecycle_status,
                     "review_status": profile_config.review_status,
-                    "autonomy_level": profile_config.autonomy_level,
                     "intended_consumers": profile_config.intended_consumers,
                     "context_quality_max_active_items": profile_config.context_quality_max_active_items,
                 }
@@ -1764,12 +1757,6 @@ def build_sprawl_warnings(result: ResolutionResult) -> list[str]:
         warnings.append(
             f"profile {result.workspace_context.profile} activates {len(result.items)} items; consider splitting or narrowing it"
         )
-    for profile in result.selected_profile_configs:
-        has_permission_notes = bool(
-            profile.allowed_tool_classes or profile.requires_approval_for or profile.forbidden_tool_classes
-        )
-        if profile.autonomy_level in {"background", "autonomous"} and not has_permission_notes:
-            warnings.append(f"high-autonomy profile lacks tool permission notes: {profile.identifier}")
     return warnings
 
 
@@ -1787,10 +1774,10 @@ def audit_text(report: dict[str, object]) -> str:
         f"sources: {', '.join(report['enabled_sources']) or 'none'}",
         f"skills: {', '.join(report['enabled_skills']) or 'none'}",
         f"policies: {', '.join(report['active_policies']) or 'none'}",
-        f"docs: {', '.join(report['active_docs']) or 'none'}",
-        f"contracts: {', '.join(report['active_contracts']) or 'none'}",
+        f"contexts: {', '.join(report['active_contexts']) or 'none'}",
+        f"completion gates: {', '.join(report['active_completion_gates']) or 'none'}",
         f"packs: {', '.join(report['active_packs']) or 'none'}",
-        f"flows: {', '.join(report['active_flows']) or 'none'}",
+        f"playbooks: {', '.join(report['active_playbooks']) or 'none'}",
         f"profiles: {', '.join(report['active_profiles']) or 'none'}",
         f"recommended-agent-types: {', '.join(report['recommended_agent_types']) or 'none'}",
         "",
@@ -1935,14 +1922,14 @@ def resolve_onboard_inputs(
     validate_repo_group_id(repo_group_id, corp)
     enabled_skills = unique_list(args.enable_skill)
     optional_policies = unique_list(args.enable_policy)
-    docs = unique_list(args.enable_doc)
+    contexts = unique_list(args.enable_context)
     recommended_agent_types = unique_list(args.recommended_agent_type)
     if guided:
         enabled_skills = enabled_skills or prompt_item_selection("skills", collect_kind_ids(corp, "skill"))
         optional_policies = optional_policies or prompt_item_selection("optional policies", collect_kind_ids(corp, "policy"))
-        docs = docs or prompt_item_selection("docs", collect_kind_ids(corp, "doc"))
+        contexts = contexts or prompt_item_selection("contexts", collect_kind_ids(corp, "context"))
         recommended_agent_types = recommended_agent_types or prompt_agent_types(corp)
-    return repo_id, repo_class, repo_group_id, enabled_skills, optional_policies, docs, recommended_agent_types
+    return repo_id, repo_class, repo_group_id, enabled_skills, optional_policies, contexts, recommended_agent_types
 
 
 def prompt_repo_id(normalized_remotes: list[str], workspace: Path) -> str:

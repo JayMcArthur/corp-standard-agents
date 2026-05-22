@@ -35,7 +35,7 @@ When produced, an episode evidence package lives under:
 
 - active profile/job
 - active item ids used during work
-- required contracts
+- required completion gates
 - source and resolution references
 - path to `.agents/resolution.json`
 
@@ -59,9 +59,9 @@ When produced, an episode evidence package lives under:
 - alternatives rejected
 - user decisions or constraints that shaped the work
 
-## Contract Evidence
+## Completion Gate Evidence
 
-Contract `evidence_required` values map to episode files by convention:
+Completion Gate `evidence_required` values map to episode files by convention:
 
 - `tests_run` and `verification_command_output`: `verification.md`
 - `files_changed_summary`: `task.md`
@@ -69,7 +69,7 @@ Contract `evidence_required` values map to episode files by convention:
 - `context_grounding`, `task_decomposition`, and `acceptance_criteria`: `task.md`
 - `verification_plan`: `verification.md`
 
-Projects may add domain-specific evidence keys. Unknown keys are allowed in contract metadata, but generated guidance should still name them explicitly.
+Projects may add domain-specific evidence keys. Unknown keys are allowed in completion gate metadata, but generated guidance should still name them explicitly.
 
 ## Non-Goals
 

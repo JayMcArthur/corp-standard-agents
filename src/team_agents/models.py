@@ -55,13 +55,7 @@ class LayerConfig:
     review_status: str = "unreviewed"
     deprecated_by: str | None = None
     sunset_after: str | None = None
-    autonomy_level: str = "interactive"
-    requires_human_approval: list[str] = field(default_factory=list)
     stop_conditions: list[str] = field(default_factory=list)
-    escalation_contact: str | None = None
-    allowed_tool_classes: list[str] = field(default_factory=list)
-    requires_approval_for: list[str] = field(default_factory=list)
-    forbidden_tool_classes: list[str] = field(default_factory=list)
     intended_consumers: list[str] = field(default_factory=list)
     context_quality_max_active_items: int | None = None
     enabled_sources: list[str] = field(default_factory=list)
@@ -73,20 +67,20 @@ class LayerConfig:
     optional_policies: list[str] = field(default_factory=list)
     disabled_optional_policies: list[str] = field(default_factory=list)
     recommended_policies: list[str] = field(default_factory=list)
-    docs: list[str] = field(default_factory=list)
-    disabled_docs: list[str] = field(default_factory=list)
-    recommended_docs: list[str] = field(default_factory=list)
-    required_contracts: list[str] = field(default_factory=list)
-    optional_contracts: list[str] = field(default_factory=list)
-    disabled_optional_contracts: list[str] = field(default_factory=list)
-    recommended_contracts: list[str] = field(default_factory=list)
+    contexts: list[str] = field(default_factory=list)
+    disabled_contexts: list[str] = field(default_factory=list)
+    recommended_contexts: list[str] = field(default_factory=list)
+    required_completion_gates: list[str] = field(default_factory=list)
+    optional_completion_gates: list[str] = field(default_factory=list)
+    disabled_optional_completion_gates: list[str] = field(default_factory=list)
+    recommended_completion_gates: list[str] = field(default_factory=list)
     required_packs: list[str] = field(default_factory=list)
     enabled_packs: list[str] = field(default_factory=list)
     disabled_packs: list[str] = field(default_factory=list)
     recommended_packs: list[str] = field(default_factory=list)
-    enabled_flows: list[str] = field(default_factory=list)
-    disabled_flows: list[str] = field(default_factory=list)
-    recommended_flows: list[str] = field(default_factory=list)
+    enabled_playbooks: list[str] = field(default_factory=list)
+    disabled_playbooks: list[str] = field(default_factory=list)
+    recommended_playbooks: list[str] = field(default_factory=list)
     enabled_profiles: list[str] = field(default_factory=list)
     disabled_profiles: list[str] = field(default_factory=list)
     recommended_profiles: list[str] = field(default_factory=list)
@@ -103,7 +97,7 @@ class LayerConfig:
     repo_class: str | None = None
     minimal_enabled_skills: list[str] = field(default_factory=list)
     minimal_optional_policies: list[str] = field(default_factory=list)
-    minimal_docs: list[str] = field(default_factory=list)
+    minimal_contexts: list[str] = field(default_factory=list)
     protected_fields: set[str] = field(default_factory=set)
     workspace_bindings: list[WorkspaceBinding] = field(default_factory=list)
 
@@ -153,13 +147,7 @@ class Item:
     review_status: str = "unreviewed"
     deprecated_by: str | None = None
     sunset_after: str | None = None
-    autonomy_level: str = "interactive"
-    requires_human_approval: list[str] = field(default_factory=list)
     stop_conditions: list[str] = field(default_factory=list)
-    escalation_contact: str | None = None
-    allowed_tool_classes: list[str] = field(default_factory=list)
-    requires_approval_for: list[str] = field(default_factory=list)
-    forbidden_tool_classes: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     recommended_agent_types: list[str] = field(default_factory=list)
     timeout_seconds: int | None = None
@@ -275,20 +263,8 @@ class ResolvedItem:
             data["deprecated_by"] = self.item.deprecated_by
         if self.item.sunset_after:
             data["sunset_after"] = self.item.sunset_after
-        if self.item.autonomy_level != "interactive":
-            data["autonomy_level"] = self.item.autonomy_level
-        if self.item.requires_human_approval:
-            data["requires_human_approval"] = self.item.requires_human_approval
         if self.item.stop_conditions:
             data["stop_conditions"] = self.item.stop_conditions
-        if self.item.escalation_contact:
-            data["escalation_contact"] = self.item.escalation_contact
-        if self.item.allowed_tool_classes:
-            data["allowed_tool_classes"] = self.item.allowed_tool_classes
-        if self.item.requires_approval_for:
-            data["requires_approval_for"] = self.item.requires_approval_for
-        if self.item.forbidden_tool_classes:
-            data["forbidden_tool_classes"] = self.item.forbidden_tool_classes
         if self.replaced_from:
             data["replaced_from"] = self.replaced_from
         if self.denied_reason:
@@ -389,10 +365,10 @@ class ResolutionResult:
     source_details: dict[str, SourceRef]
     enabled_skills: list[str]
     active_policies: list[str]
-    active_docs: list[str]
-    active_contracts: list[str]
+    active_contexts: list[str]
+    active_completion_gates: list[str]
     active_packs: list[str]
-    active_flows: list[str]
+    active_playbooks: list[str]
     active_profiles: list[str]
     recommended_items: list[str]
     recommended_agent_types: list[str]
@@ -431,10 +407,10 @@ class ResolutionResult:
             },
             "enabled_skills": self.enabled_skills,
             "active_policies": self.active_policies,
-            "active_docs": self.active_docs,
-            "active_contracts": self.active_contracts,
+            "active_contexts": self.active_contexts,
+            "active_completion_gates": self.active_completion_gates,
             "active_packs": self.active_packs,
-            "active_flows": self.active_flows,
+            "active_playbooks": self.active_playbooks,
             "active_profiles": self.active_profiles,
             "recommended_items": self.recommended_items,
             "recommended_agent_types": self.recommended_agent_types,
@@ -449,13 +425,7 @@ class ResolutionResult:
                         "maintainer": profile.maintainer,
                         "status": profile.lifecycle_status,
                         "review_status": profile.review_status,
-                        "autonomy_level": profile.autonomy_level,
-                        "requires_human_approval": profile.requires_human_approval,
                         "stop_conditions": profile.stop_conditions,
-                        "escalation_contact": profile.escalation_contact,
-                        "allowed_tool_classes": profile.allowed_tool_classes,
-                        "requires_approval_for": profile.requires_approval_for,
-                        "forbidden_tool_classes": profile.forbidden_tool_classes,
                         "intended_consumers": profile.intended_consumers,
                     }.items()
                     if value not in (None, [])

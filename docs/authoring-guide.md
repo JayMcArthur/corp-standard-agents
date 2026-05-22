@@ -26,32 +26,32 @@ Corporate standards repo:
 corp-control/
   org/
     config.toml
-    docs/
+    contexts/
     policies/
-    contracts/
+    completion_gates/
     skills/
-    flows/
+    playbooks/
     packs/
     profiles/
     sources/
   repo-groups/
     <group-id>/
       config.toml
-      docs/
+      contexts/
       policies/
-      contracts/
+      completion_gates/
       skills/
-      flows/
+      playbooks/
       packs/
       profiles/
   repos/
     <repo-id>/
       config.toml
-      docs/
+      contexts/
       policies/
-      contracts/
+      completion_gates/
       skills/
-      flows/
+      playbooks/
       packs/
       profiles/
   indexes/
@@ -65,11 +65,11 @@ Local user layer:
 ```text
 ~/team-agents-user/
   config.toml
-  docs/
+  contexts/
   policies/
-  contracts/
+  completion_gates/
   skills/
-  flows/
+  playbooks/
   packs/
   profiles/
   activations/
@@ -81,11 +81,11 @@ Local user layer:
 
 Use the smallest fitting item kind:
 
-- `doc`: reference knowledge or context
+- `context`: reference knowledge or context
 - `policy`: rule or guidance
-- `contract`: required behavior, boundaries, definition of done, and evidence requirements
+- `completion_gate`: required behavior, boundaries, definition of done, and evidence requirements
 - `skill`: reusable agent capability
-- `flow`: repeatable playbook, not executable automation in v1
+- `playbook`: repeatable playbook, not executable automation in v1
 - `pack`: bundle of standards
 - `profile` or `job`: lightweight work mode that selects context
 
@@ -100,13 +100,13 @@ Every item id must match:
 Allowed values:
 
 - `source-type`: `corp`, `external`, `user`
-- `kind`: `skill`, `policy`, `doc`, `contract`, `flow`, `pack`, `profile`
+- `kind`: `skill`, `policy`, `context`, `completion_gate`, `playbook`, `pack`, `profile`
 - `namespace`: lowercase ASCII, digits, `_`, `-`
 - `slug`: lowercase ASCII, digits, `_`, `-`
 
 Examples:
 
-- `corp.shadowknight.contract.definition-of-done`
+- `corp.shadowknight.completion_gate.definition-of-done`
 - `corp.shadowknight.profile.reviewer`
 - `external.shared.policy.ext-policy`
 - `user.local.skill.personal-shell`
@@ -134,10 +134,10 @@ Examples:
 
 Local user `config.toml`:
 
-- may define personal docs, skills, flows, packs, profiles, preferences, and workspace bindings
+- may define personal contexts, skills, playbooks, packs, profiles, preferences, and workspace bindings
 - may enable personal context explicitly
-- may not define corp-required contracts or protected repo identity fields
-- may not weaken required corp, repo, or profile policies and contracts
+- may not define corp-required completion gates or protected repo identity fields
+- may not weaken required corp, repo, or profile policies and completion gates
 
 ## Activation
 
@@ -146,22 +146,22 @@ Required standards apply automatically. Optional standards require explicit enab
 ```toml
 [activation]
 required = [
-  "corp.shadowknight.contract.definition-of-done",
+  "corp.shadowknight.completion_gate.definition-of-done",
   "corp.shadowknight.policy.no-secrets"
 ]
 enabled = [
   "corp.shadowknight.skill.sql-review",
-  "corp.shadowknight.doc.repo-map"
+  "corp.shadowknight.context.repo-map"
 ]
 disabled = []
 ```
 
-Compatibility fields from the older config model should be treated as input aliases during migration:
+Layer configs may also use direct activation lists when a table would be noisy:
 
 - `enabled_skills` -> `activation.enabled`
 - `baseline_policies` -> `activation.required`
 - `optional_policies` -> `activation.enabled`
-- `docs` -> `activation.enabled`
+- `contexts` -> `activation.enabled`
 
 ## Profiles And Jobs
 
@@ -173,22 +173,16 @@ Example profile:
 id = "reviewer"
 title = "Reviewer"
 purpose = "Review code changes with security, correctness, and evidence checks."
-autonomy_level = "interactive"
-requires_human_approval = ["file_delete", "external_send", "deploy"]
 stop_conditions = ["secrets_detected", "tests_fail_after_two_attempts", "unclear_requirement"]
-escalation_contact = "platform-enablement"
-allowed_tool_classes = ["read", "edit", "test"]
-requires_approval_for = ["shell", "network", "secrets", "deploy"]
-forbidden_tool_classes = ["email-send", "payment", "prod-write"]
 context_budget = "small"
 
 [activation]
 required = [
-  "corp.shadowknight.contract.review-before-approve",
-  "corp.shadowknight.contract.definition-of-done"
+  "corp.shadowknight.completion_gate.review-before-approve",
+  "corp.shadowknight.completion_gate.definition-of-done"
 ]
 enabled = [
-  "corp.shadowknight.flow.pr-review",
+  "corp.shadowknight.playbook.pr-review",
   "corp.shadowknight.policy.security-checklist"
 ]
 ```
@@ -217,7 +211,7 @@ applicability = "Django 5.x services using PostgreSQL migrations"
 evidence = "Caught missing rollback and lock-risk cases in two reviewed PRs"
 risks = "Can over-warn for small internal-only tables"
 scope = "Only migration review, not general database design"
-redundancy = "Complements the definition-of-done contract; does not duplicate it"
+redundancy = "Complements the definition-of-done completion gate; does not duplicate it"
 ```
 
 `promote-skills` warns when this checklist or any required field is missing. Treat that warning as a review gate for shared standards: fill in evidence, narrow the skill, or keep it local.
@@ -280,9 +274,9 @@ repo_tags = ["web-api"]
 
 Resolution warns on likely mismatches. Warnings are advisory in v1; narrow or disable the item when the mismatch is real.
 
-## Contract And Flow Evidence
+## Completion Gate And Playbook Evidence
 
-Contracts and flows can require explicit completion evidence:
+Completion gates and playbooks can require explicit completion evidence:
 
 ```toml
 evidence_required = [
@@ -293,7 +287,7 @@ evidence_required = [
 ]
 ```
 
-Flows can also declare their operating boundary:
+Playbooks can also declare their operating boundary:
 
 ```toml
 inputs = ["issue", "repo_context"]
@@ -301,7 +295,7 @@ outputs = ["patch", "verification_report"]
 stop_conditions = ["ambiguous_requirement", "security_boundary_unclear"]
 ```
 
-Generated `.agents/index.md`, AGENTS.md, and `audit --json` surface active contract and flow evidence requirements before work is called done. `.agents/index.md` also renders active flow inputs, outputs, and stop conditions. v1 does not execute flows or enforce collection automatically.
+Generated `.agents/index.md`, AGENTS.md, and `audit --json` surface active completion gate and playbook evidence requirements before work is called done. `.agents/index.md` also renders active playbook inputs, outputs, and stop conditions. v1 does not execute playbooks or enforce collection automatically.
 
 Future harnesses should write episode evidence using the shape in `docs/specs/v1/episode-evidence-package.md`:
 
@@ -320,23 +314,15 @@ Harnesses can request a narrowed constraint view without adding orchestration:
 team-agents context --workspace /path/to/repo --for-harness --json
 ```
 
-That output packages selected profile/job metadata, required contracts, evidence requirements, tool permission notes, stop conditions, and denied/warning context. The integration contract is documented in `docs/specs/v1/harness-integration-contract.md`.
+That output packages selected profile/job metadata, required completion gates, evidence requirements, stop conditions, and denied/warning context. The integration contract is documented in `docs/specs/v1/harness-integration-contract.md`.
 
-Agent OS products can request a standards view without adding task, memory, handoff, scheduling, permission-runtime, or intervention-log state to `team-agents`:
-
-```bash
-team-agents context --workspace /path/to/repo --for-agent-os --json
-```
-
-That output packages the provider boundary, integration surfaces, active standards, selected profile/job metadata, trust and review metadata, contracts, flow playbooks, generated targets, warnings, and denied context. The integration contract is documented in `docs/specs/v1/agent-os-integration-contract.md`.
-
-Workflow engines can select a profile/job and read active flow playbooks and contracts without adding execution to `team-agents`:
+Workflow engines can select a profile/job and read active playbooks and completion gates without adding execution to `team-agents`:
 
 ```bash
 team-agents context --workspace /path/to/repo --profile reviewer --for-workflow-engine --json
 ```
 
-That output packages the workflow boundary, selected profile/job metadata, active contracts, flow inputs and outputs, evidence requirements, stop conditions, warnings, and denied context. The integration contract is documented in `docs/specs/v1/workflow-engine-integration-contract.md`.
+That output packages the workflow boundary, selected profile/job metadata, active completion gates, playbook inputs and outputs, evidence requirements, stop conditions, warnings, and denied context. The integration contract is documented in `docs/specs/v1/workflow-engine-integration-contract.md`.
 
 ## Workspace Bindings
 
@@ -354,7 +340,7 @@ Rules:
 
 - `name` and `path` are required
 - set `repo_id` or `repo_group_id`, not both
-- local suppression must not disable required contracts or hard safety boundaries
+- local suppression must not disable required completion gates or hard safety boundaries
 
 ## Validation Workflow
 
@@ -367,9 +353,9 @@ PYTHONPATH=src python3 -m team_agents doctor --workspace /path/to/repo --json
 Use this before `sync` when authoring new corp or user config. It should flag:
 
 - invalid repo layout or source manifests
-- missing required contracts
+- missing required completion gates
 - unsafe materialization settings
-- context quality problems, including too many active items, duplicate docs/policies, missing verification contracts, and missing client-data boundaries for client repos
+- context quality problems, including too many active items, duplicate contexts/policies, missing verification completion gates, and missing client-data boundaries for client repos
 - tracked generated `.agents` content
 - tracked router files that may block sync
 - workspace resolution failures
@@ -389,9 +375,9 @@ team-agents validate --workspace /path/to/repo --json --strict
 team-agents registry --json
 ```
 
-`audit --json` includes a `standards_registry` summary, `sprawl_warnings`, and `context_quality_warnings`. Context quality warnings include remediation text and cover active item count thresholds, broad profile-selected docs, duplicate docs/policies, missing verification contracts, and missing client-data boundaries for client repos. Add `owner`, `maintainer`, `status`, and `review_status` to shared items and profile configs so standards have clear accountability.
+`audit --json` includes a `standards_registry` summary, `sprawl_warnings`, and `context_quality_warnings`. Context quality warnings include remediation text and cover active item count thresholds, broad profile-selected contexts, duplicate contexts/policies, missing verification completion gates, and missing client-data boundaries for client repos. Add `owner`, `maintainer`, `status`, and `review_status` to shared items and profile configs so standards have clear accountability.
 
-`registry --json` lists available docs, policies, contracts, skills, flows, packs, profiles, and sources across the configured corp and local user layers. Use `--kind`, `--repo-id`, `--profile`, and `--status` to narrow governance and Agent OS integration views.
+`registry --json` lists available contexts, policies, completion gates, skills, playbooks, packs, profiles, and sources across the configured corp and local user layers. Use `--kind`, `--repo-id`, `--profile`, and `--status` to narrow governance and integration views.
 
 CI/governance systems should use `validate --json` for a stable validation report. Schema and resolution failures return nonzero. `--strict` also fails when governance warnings exist. `audit --json --strict` and `doctor --json --strict` use the same warning-strict behavior. The command surface and GitHub Actions example are documented in `docs/specs/v1/ci-governance-command-surface.md`.
 

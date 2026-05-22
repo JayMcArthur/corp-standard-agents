@@ -1,6 +1,6 @@
 # Produced Artifact Manifest v1
 
-`team-agents sync` writes `.agents/artifacts.json` so humans, CI, harnesses, Agent OS products, and workflow engines can inspect which files were generated and what each file is for.
+`team-agents sync` writes `.agents/artifacts.json` so humans, CI, harnesses, workflow engines, and downstream tooling can inspect which files were generated and what each file is for.
 
 Top-level fields:
 
@@ -13,7 +13,7 @@ Top-level fields:
 Each artifact entry includes:
 
 - `path`: path relative to the workspace root
-- `kind`: artifact category such as `context-index`, `resolution`, `artifact-manifest`, `skill`, `policy`, `doc`, `bootstrap-guidance`, or `tool-router`
+- `kind`: artifact category such as `context-index`, `resolution`, `artifact-manifest`, `skill`, `policy`, `context`, `bootstrap-guidance`, or `tool-router`
 - `target`: target tool for router files, such as `codex`, `claude`, or `cursor`; otherwise null
 - `generated_by`: command producer, currently `team-agents sync`
 - `source_resolution_hash`: hash tying the artifact to the resolved context
@@ -26,7 +26,7 @@ Manifest coverage includes:
 - `.agents/index.md`
 - `.agents/resolution.json`
 - `.agents/artifacts.json`
-- generated `.agents/skills/`, `.agents/policies/`, and `.agents/docs/` files
+- generated `.agents/skills/`, `.agents/policies/`, and `.agents/contexts/` files
 - `.agents/bootstrap.md` when bootstrap guidance is active
 - tool-native router files such as `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/team-agents.mdc`
 

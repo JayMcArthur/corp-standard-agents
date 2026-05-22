@@ -21,7 +21,7 @@ class PackagePositioningTests(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("`team-agents` is a Git-backed standards layer for AI tools.", readme)
-        self.assertIn("not an Agent OS", readme)
+        self.assertIn("not an orchestrator", readme)
         self.assertIn("orchestrator", readme)
         self.assertIn("bash scripts/bootstrap_examples.sh", readme)
         self.assertIn("Author A Standard", readme)

@@ -7,17 +7,17 @@ The managed block must include:
 - workspace identity: repo id, repo group, repo class, and selected profile/job
 - pointer to `.agents/index.md` for human-readable expanded context
 - pointer to `.agents/resolution.json` for machine-readable provenance, activation reasons, source paths, warnings, and denied items
-- required contracts selected for the workspace
+- required completion gates selected for the workspace
 - bootstrap or minimal verification guidance when available
-- required evidence before done when active contracts or flows declare `evidence_required`
-- preparation flow pointers for broad, ambiguous, risky, or multi-file work
-- autonomy, approval, stop-condition, and tool-permission notes selected by profiles or active flows
+- required evidence before done when active completion gates or playbooks declare `evidence_required`
+- preparation playbook pointers for broad, ambiguous, risky, or multi-file work
+- stop conditions selected by profiles or active playbooks
 - privacy and generated-output safety boundaries
 
 The managed block must not include:
 
 - full skill bodies by default
-- full policy, doc, contract, flow, pack, or profile bodies
+- full policy, context, completion gate, playbook, pack, or profile bodies
 - corp-private operational bodies in client repos
 - executable orchestration logic
 

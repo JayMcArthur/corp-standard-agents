@@ -25,7 +25,7 @@ team-agents doctor --workspace /path/to/repo
 team-agents validate --workspace /path/to/repo
 ```
 
-Use `context --json` for the canonical resolution JSON. Use `--for-harness`, `--for-agent-os`, or `--for-workflow-engine` for narrowed integration views.
+Use `context --json` for the canonical resolution JSON. Use `--for-harness` or `--for-workflow-engine` for narrowed integration views.
 
 ## Configuration Commands
 
@@ -39,7 +39,7 @@ team-agents bind-workspace --path /path/to/repo --repo-id internal-app
 team-agents add-source --layer org --source-id shared --url <git-url> --commit <sha> --namespace shared --enable
 ```
 
-These commands edit layer config and bindings. Required policies, contracts, and packs cannot be weakened by user or workspace additions.
+These commands edit layer config and bindings. Required policies, completion gates, and packs cannot be weakened by user or workspace additions.
 
 ## Library Commands
 

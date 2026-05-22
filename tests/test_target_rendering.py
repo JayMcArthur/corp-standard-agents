@@ -35,28 +35,19 @@ class TargetRenderingTests(unittest.TestCase):
         result = make_resolution_result(Path("/tmp/source"))
         self.assertEqual(render_agents_md_contract(result) + "\n", read_golden("agents_md_contract.md"))
 
-    def test_agents_md_contract_includes_autonomy_stop_rules(self) -> None:
+    def test_agents_md_contract_includes_stop_rules(self) -> None:
         result = make_resolution_result(Path("/tmp/source"))
         result.selected_profile_configs = [
             LayerConfig(
                 layer_name="profile",
                 layer_path=Path("/tmp/source/profiles/coder.toml"),
                 identifier="coder",
-                autonomy_level="background",
-                requires_human_approval=["file_delete", "deploy"],
                 stop_conditions=["secrets_detected", "unclear_requirement"],
-                escalation_contact="platform-enablement",
-                allowed_tool_classes=["read", "edit", "test"],
-                requires_approval_for=["shell", "network"],
-                forbidden_tool_classes=["payment"],
             )
         ]
         rendered = render_agents_md_contract(result)
-        self.assertIn("## Autonomy And Stop Conditions", rendered)
-        self.assertIn("Profile `coder` autonomy level: `background`", rendered)
+        self.assertIn("## Stop Conditions", rendered)
         self.assertIn("Stop and escalate when: `secrets_detected`, `unclear_requirement`", rendered)
-        self.assertIn("Profile `coder` allowed tool classes: `read`, `edit`, `test`", rendered)
-        self.assertIn("Profile `coder` forbidden tool classes: `payment`", rendered)
 
 
 def make_item(root: Path) -> Item:
@@ -88,8 +79,8 @@ def read_golden(name: str) -> str:
 
 def make_resolution_result(root: Path) -> ResolutionResult:
     done = Item(
-        item_id="corp.example.contract.definition-of-done",
-        kind="contract",
+        item_id="corp.example.completion_gate.definition-of-done",
+        kind="completion_gate",
         title="Definition Of Done",
         privacy="repo-safe",
         source_type="corp",
@@ -97,12 +88,12 @@ def make_resolution_result(root: Path) -> ResolutionResult:
         source_ref=str(root),
         body="Done means verified.",
         slug="definition-of-done",
-        item_path=root / "contracts" / "definition-of-done" / "item.toml",
-        body_path=root / "contracts" / "definition-of-done" / "body.md",
+        item_path=root / "completion_gates" / "definition-of-done" / "item.toml",
+        body_path=root / "completion_gates" / "definition-of-done" / "body.md",
     )
     bootstrap = Item(
-        item_id="corp.example.contract.repo-bootstrap",
-        kind="contract",
+        item_id="corp.example.completion_gate.repo-bootstrap",
+        kind="completion_gate",
         title="Repo Bootstrap",
         privacy="repo-safe",
         source_type="corp",
@@ -117,13 +108,13 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 """,
         slug="repo-bootstrap",
-        item_path=root / "contracts" / "repo-bootstrap" / "item.toml",
-        body_path=root / "contracts" / "repo-bootstrap" / "body.md",
+        item_path=root / "completion_gates" / "repo-bootstrap" / "item.toml",
+        body_path=root / "completion_gates" / "repo-bootstrap" / "body.md",
         tags=["bootstrap"],
     )
     prep = Item(
-        item_id="corp.example.flow.prep-before-code",
-        kind="flow",
+        item_id="corp.example.playbook.prep-before-code",
+        kind="playbook",
         title="Prep Before Code",
         privacy="repo-safe",
         source_type="corp",
@@ -131,8 +122,8 @@ PYTHONPATH=src python -m unittest discover -s tests -v
         source_ref=str(root),
         body="Prepare before coding.",
         slug="prep-before-code",
-        item_path=root / "flows" / "prep-before-code" / "item.toml",
-        body_path=root / "flows" / "prep-before-code" / "body.md",
+        item_path=root / "playbooks" / "prep-before-code" / "item.toml",
+        body_path=root / "playbooks" / "prep-before-code" / "body.md",
         tags=["prep", "mise-en-place"],
     )
     items = {
@@ -174,10 +165,10 @@ PYTHONPATH=src python -m unittest discover -s tests -v
         source_details={},
         enabled_skills=[],
         active_policies=[],
-        active_docs=[],
-        active_contracts=[done.item_id, bootstrap.item_id],
+        active_contexts=[],
+        active_completion_gates=[done.item_id, bootstrap.item_id],
         active_packs=[],
-        active_flows=[prep.item_id],
+        active_playbooks=[prep.item_id],
         active_profiles=[],
         recommended_items=[],
         recommended_agent_types=[],

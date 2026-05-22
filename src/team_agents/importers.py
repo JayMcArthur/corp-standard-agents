@@ -22,9 +22,9 @@ def import_folder_skills(
     source_root = source_root.resolve()
     layer_root = layer_root.resolve()
     skills_root = layer_root / "skills"
-    docs_root = layer_root / "docs"
+    docs_root = layer_root / "contexts"
     imported_skills = 0
-    imported_docs = 0
+    imported_contexts = 0
 
     enabled_skills: list[str] = []
     config_path = layer_root / "config.toml"
@@ -65,8 +65,8 @@ def import_folder_skills(
         ):
             relative = resource.relative_to(skill_dir)
             doc_slug = _sanitize_slug(f"{slug}-{relative.as_posix().replace('/', '-')}")
-            doc_id = f"{source_type}.{namespace}.doc.{doc_slug}"
-            imported_docs += 1
+            doc_id = f"{source_type}.{namespace}.context.{doc_slug}"
+            imported_contexts += 1
             resource_docs.append((doc_id, relative))
             doc_dir = docs_root / doc_slug
             doc_dir.mkdir(parents=True, exist_ok=True)
@@ -74,7 +74,7 @@ def import_folder_skills(
                 doc_dir / "item.toml",
                 {
                     "id": doc_id,
-                    "kind": "doc",
+                    "kind": "context",
                     "title": f"{skill_dir.name} resource {relative.as_posix()}",
                     "privacy": privacy,
                     "source_note": f"Imported from {resource}",
@@ -96,7 +96,7 @@ def import_folder_skills(
     write_toml_document(config_path, existing)
     for name in ["policies", "sources", "workspaces"]:
         (layer_root / name).mkdir(parents=True, exist_ok=True)
-    return {"skills": imported_skills, "docs": imported_docs}
+    return {"skills": imported_skills, "contexts": imported_contexts}
 
 
 def import_codex_skills(
@@ -124,7 +124,7 @@ def import_codex_skills(
 def prune_managed_imports(layer_root: Path, source_type: str, namespace: str) -> set[str]:
     removed_enabled: set[str] = set()
     managed_prefix = f"{source_type}.{namespace}."
-    for folder in ("skills", "docs"):
+    for folder in ("skills", "contexts"):
         base = layer_root / folder
         if not base.exists():
             continue
@@ -155,8 +155,8 @@ def _ensure_layer_defaults(data: dict[str, object]) -> None:
         data.setdefault("optional_policies", [])
         data.setdefault("disabled_optional_policies", [])
         data.setdefault("preferred_agent_types", [])
-    data.setdefault("docs", [])
-    data.setdefault("disabled_docs", [])
+    data.setdefault("contexts", [])
+    data.setdefault("disabled_contexts", [])
 
 
 def _sanitize_slug(value: str) -> str:

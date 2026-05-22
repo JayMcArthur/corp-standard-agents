@@ -83,11 +83,11 @@ def write_index_md(result: ResolutionResult, agents_dir: Path) -> Path:
     lines.extend(["", "## Active Policies"])
     for item_id in result.active_policies:
         lines.append(f"- `{item_id}`")
-    lines.extend(["", "## Active Docs"])
-    for item_id in result.active_docs:
+    lines.extend(["", "## Active Contexts"])
+    for item_id in result.active_contexts:
         lines.append(f"- `{item_id}`")
-    lines.extend(["", "## Active Contracts"])
-    for item_id in result.active_contracts:
+    lines.extend(["", "## Active Completion Gates"])
+    for item_id in result.active_completion_gates:
         lines.append(f"- `{item_id}`")
     evidence_lines = render_evidence_requirements(result)
     if evidence_lines:
@@ -96,12 +96,12 @@ def write_index_md(result: ResolutionResult, agents_dir: Path) -> Path:
     lines.extend(["", "## Active Packs"])
     for item_id in result.active_packs:
         lines.append(f"- `{item_id}`")
-    lines.extend(["", "## Active Flows"])
-    for item_id in result.active_flows:
+    lines.extend(["", "## Active Playbooks"])
+    for item_id in result.active_playbooks:
         lines.append(f"- `{item_id}`")
         resolved = result.items.get(item_id)
         if resolved is not None:
-            lines.extend(render_flow_metadata_lines(resolved.item))
+            lines.extend(render_playbook_metadata_lines(resolved.item))
     lines.extend(["", "## Active Profiles"])
     for item_id in result.active_profiles:
         lines.append(f"- `{item_id}`")
@@ -132,7 +132,7 @@ def write_index_md(result: ResolutionResult, agents_dir: Path) -> Path:
 
 def render_evidence_requirements(result: ResolutionResult) -> list[str]:
     lines: list[str] = []
-    for item_id in result.active_contracts + result.active_flows:
+    for item_id in result.active_completion_gates + result.active_playbooks:
         resolved = result.items.get(item_id)
         if resolved is None or not resolved.item.evidence_required:
             continue
@@ -142,7 +142,7 @@ def render_evidence_requirements(result: ResolutionResult) -> list[str]:
     return lines
 
 
-def render_flow_metadata_lines(item: Item) -> list[str]:
+def render_playbook_metadata_lines(item: Item) -> list[str]:
     lines: list[str] = []
     if item.inputs:
         lines.append("  - Inputs: " + ", ".join(f"`{value}`" for value in item.inputs))
@@ -247,8 +247,8 @@ def artifact_kind(relative: str) -> str:
         return "skill"
     if relative.startswith(".agents/policies/"):
         return "policy"
-    if relative.startswith(".agents/docs/"):
-        return "doc"
+    if relative.startswith(".agents/contexts/"):
+        return "context"
     if relative in ROUTER_FILES:
         return "tool-router"
     return "generated-artifact"
@@ -273,7 +273,7 @@ def artifact_description(relative: str) -> str:
         return "Generated skill body selected for this workspace."
     if relative.startswith(".agents/policies/"):
         return "Generated policy body selected for this workspace."
-    if relative.startswith(".agents/docs/"):
+    if relative.startswith(".agents/contexts/"):
         return "Generated documentation selected for this workspace."
     if relative == ROUTER_TARGETS["codex"]:
         return "Codex router file pointing to generated team-agents context."
@@ -306,8 +306,8 @@ def write_item_outputs(result: ResolutionResult, agents_dir: Path, repo_class: s
             path = agents_dir / "skills" / resolved.item.slug / "SKILL.md"
         elif resolved.item.kind == "policy":
             path = agents_dir / "policies" / f"{resolved.item.slug}.md"
-        elif resolved.item.kind == "doc":
-            path = agents_dir / "docs" / f"{resolved.item.slug}.md"
+        elif resolved.item.kind == "context":
+            path = agents_dir / "contexts" / f"{resolved.item.slug}.md"
         else:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)

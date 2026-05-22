@@ -2,18 +2,18 @@
 
 `team-agents` is a Git-backed standards layer for AI tools.
 
-It lets a team define reusable docs, policies, contracts, skills, flows, packs, and profiles once, then project the smallest correct subset into Claude Code, Codex CLI, Cursor, and other adapters without committing private standards into client repositories.
+It lets a team define reusable contexts, policies, completion gates, skills, playbooks, packs, and profiles once, then project the smallest correct subset into Claude Code, Codex CLI, Cursor, and other adapters without committing private standards into client repositories.
 
 ## Try It
 
-Build disposable example workspaces and verify the full flow:
+Build disposable example workspaces and verify the full playbook:
 
 ```bash
 bash scripts/bootstrap_examples.sh
 bash scripts/check_example_flow.sh
 ```
 
-The example flow creates a corp standards repo, a local user layer, internal and client workspaces, generated `.agents/` artifacts, and target files such as `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/team-agents.mdc`.
+The example playbook creates a corp standards repo, a local user layer, internal and client workspaces, generated `.agents/` artifacts, and target files such as `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/team-agents.mdc`.
 
 ## Install
 
@@ -37,7 +37,7 @@ Corp-managed users are available for organizations that want central auditabilit
 team-agents setup --corp-repo /opt/corp-control --user alice
 ```
 
-## Daily Flow
+## Daily Playbook
 
 Attach a workspace, inspect the selected context, then render target files:
 
@@ -61,7 +61,7 @@ timeout_seconds = 20
 source_note = "Personal timeout override for this machine"
 ```
 
-Local user overrides may tune optional context or add personal context. They may not disable required corp, repo, or profile policies, contracts, or packs.
+Local user overrides may tune optional context or add personal context. They may not disable required corp, repo, or profile policies, completion gates, or packs.
 
 Omit `--mode` from `attach` when you want to choose interactively between repo, group, baseline, and configure-now attachment.
 
@@ -101,13 +101,13 @@ The generated target files include the active skill while preserving provenance 
 Standards are authored in Git-friendly folders:
 
 ```text
-docs/       knowledge and context
-policies/   rules and guidance
-contracts/ required behavior, boundaries, definition of done, evidence
-skills/     reusable agent capabilities
-flows/      repeatable human/agent playbooks, not executable automation
-packs/      bundles of docs, policies, contracts, skills, and flows
-profiles/   lightweight work modes such as coder, reviewer, support, architect
+contexts/         knowledge and context
+policies/         rules and guidance
+completion_gates/ required behavior, boundaries, definition of done, evidence
+skills/           reusable agent capabilities
+playbooks/        repeatable human/agent playbooks, not executable automation
+packs/            bundles of contexts, policies, completion gates, skills, and playbooks
+profiles/         lightweight work modes such as coder, reviewer, support, architect
 ```
 
 Resolution is layered:
@@ -165,14 +165,14 @@ Activation is configured in layer `config.toml` files and `profiles/*.toml`. The
   artifacts.json
   skills/
   policies/
-  contracts/
-  docs/
+  completion_gates/
+  contexts/
 AGENTS.md
 CLAUDE.md
 .cursor/rules/team-agents.mdc
 ```
 
-Primary output contracts:
+Primary output artifacts:
 
 - `.agents/resolution.json`: canonical machine-readable resolution artifact
 - `.agents/index.md`: human-readable active context and provenance summary
@@ -198,13 +198,12 @@ team-agents validate --workspace /path/to/repo --json
 
 ## Integration Views
 
-`team-agents` is not an Agent OS, orchestrator, harness, task runner, swarm runtime, CRM, inbox automation system, or background workflow engine. It supplies standards, context, provenance, validation, and target-specific rendering.
+`team-agents` is not an orchestrator, harness, task runner, swarm runtime, CRM, inbox automation system, or background workflow engine. It supplies standards, context, provenance, validation, and target-specific rendering.
 
 External runtimes can request narrowed context views:
 
 ```bash
 team-agents context --workspace /path/to/repo --for-harness --json
-team-agents context --workspace /path/to/repo --for-agent-os --json
 team-agents context --workspace /path/to/repo --profile reviewer --for-workflow-engine --json
 ```
 
@@ -216,11 +215,11 @@ Those views describe constraints and selected context. Runtime execution, schedu
 corp-control/
   org/
     config.toml
-    docs/
+    contexts/
     policies/
-    contracts/
+    completion_gates/
     skills/
-    flows/
+    playbooks/
     packs/
     profiles/
     sources/
@@ -234,11 +233,11 @@ Local user layer:
 ```text
 ~/team-agents-user/
   config.toml
-  docs/
+  contexts/
   policies/
-  contracts/
+  completion_gates/
   skills/
-  flows/
+  playbooks/
   packs/
   profiles/
   sources/
@@ -250,7 +249,7 @@ Local user layer:
 - [Authoring guide](docs/authoring-guide.md)
 - [CLI reference](docs/cli-reference.md)
 - [Consumer docs](docs/consumers/developers.md)
-- [Public contract specs](docs/specs/v1/item-schema.md)
+- [Public specs](docs/specs/v1/item-schema.md)
 - [Examples](examples/workspaces/README.md)
 
 ## Tests

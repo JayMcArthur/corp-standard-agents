@@ -18,7 +18,6 @@ class FrozenV1SpecsTests(unittest.TestCase):
             "resolution-output.md",
             "agents-md-contract.md",
             "harness-integration-contract.md",
-            "agent-os-integration-contract.md",
             "workflow-engine-integration-contract.md",
             "ci-governance-command-surface.md",
             "produced-artifact-manifest.md",

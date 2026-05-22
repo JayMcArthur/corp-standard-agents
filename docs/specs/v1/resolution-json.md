@@ -12,11 +12,11 @@ This document freezes the `resolution.json` output contract for team-agents v1. 
 - agent runtimes
 - `team-agents audit`
 - `team-agents doctor`
-- CI, harness, Agent OS, workflow-engine, and downstream tooling that needs to inspect resolved provenance
+- CI, harness, workflow-engine, and downstream tooling that needs to inspect resolved provenance
 
 The canonical machine-readable schema lives at `docs/specs/v1/resolution-json.schema.json`. The runtime copy at `src/team_agents/schemas/resolution-json-v1.schema.json` and the public package copy at `schemas/resolution.schema.json` must stay byte-for-byte equivalent in meaning.
 
-## Top-Level Contract
+## Top-Level Completion Gate
 
 Required top-level fields:
 
@@ -35,10 +35,10 @@ Required top-level fields:
 - `source_details`
 - `enabled_skills`
 - `active_policies`
-- `active_docs`
-- `active_contracts`
+- `active_contexts`
+- `active_completion_gates`
 - `active_packs`
-- `active_flows`
+- `active_playbooks`
 - `active_profiles`
 - `recommended_items`
 - `recommended_agent_types`
@@ -69,4 +69,4 @@ Required top-level fields:
 ## Notes
 
 - `schema_version = "v1"` is part of the frozen contract.
-- Contract tests validate the schema and representative resolved output.
+- Completion Gate tests validate the schema and representative resolved output.

@@ -19,7 +19,7 @@ class CanonicalIdContractTests(unittest.TestCase):
         for item_id in [
             "corp.shadowknight.skill.shell-global",
             "external.shared.policy.ext-policy",
-            "user.local.doc.personal_notes",
+            "user.local.context.personal_notes",
         ]:
             with self.subTest(item_id=item_id):
                 parts = validate_canonical_id(item_id)

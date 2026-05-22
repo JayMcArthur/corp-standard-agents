@@ -4,9 +4,9 @@ Developers consume resolved standards in their working repos and may add local u
 
 ## Produces
 
-- local user-layer docs, skills, flows, packs, profiles, and workspace bindings
+- local user-layer contexts, skills, playbooks, packs, profiles, and workspace bindings
 - explicit personal activations
-- work evidence when a profile, contract, or flow asks for it
+- work evidence when a profile, completion gate, or playbook asks for it
 
 ## Consumes
 
@@ -28,4 +28,4 @@ team-agents doctor --workspace /path/to/repo
 
 ## Boundaries
 
-Developers may add personal context and choose profiles. They may not disable corp-required policies, contracts, or packs, weaken corp-private privacy, or use `team-agents` as a task manager, background agent, or automation runtime.
+Developers may add personal context and choose profiles. They may not disable corp-required policies, completion gates, or packs, weaken corp-private privacy, or use `team-agents` as a task manager, background agent, or automation runtime.

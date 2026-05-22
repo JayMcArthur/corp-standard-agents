@@ -7,9 +7,9 @@
 
 Generated context lives under `.agents/`. Read `.agents/index.md` first, and use `.agents/resolution.json` for provenance, activation reasons, and source paths.
 
-## Required Contracts
-- `corp.example.contract.definition-of-done`: Definition Of Done
-- `corp.example.contract.repo-bootstrap`: Repo Bootstrap
+## Required Completion Gates
+- `corp.example.completion_gate.definition-of-done`: Definition Of Done
+- `corp.example.completion_gate.repo-bootstrap`: Repo Bootstrap
 
 ## Minimal Verification
 
@@ -18,11 +18,11 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 ## Preparation For Complex Work
-For broad, ambiguous, risky, or multi-file work, use the active preparation flow before implementation:
-- `corp.example.flow.prep-before-code`: Prep Before Code
+For broad, ambiguous, risky, or multi-file work, use the active preparation playbook before implementation:
+- `corp.example.playbook.prep-before-code`: Prep Before Code
 
 ## Safety
 - Treat `.agents/` and this managed block as generated local context.
 - Do not commit generated private context unless the repo explicitly tracks it by policy.
 
-Expanded skills, policies, docs, contracts, flows, packs, and profile details stay in `.agents/`; this file stays concise.
+Expanded skills, policies, contexts, completion gates, playbooks, packs, and profile details stay in `.agents/`; this file stays concise.

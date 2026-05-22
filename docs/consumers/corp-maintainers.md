@@ -1,6 +1,6 @@
 # Corp Maintainers
 
-Corp maintainers own the standards repo. They publish reusable policies, contracts, docs, skills, flows, packs, profiles, repo registry entries, source pins, and governance defaults.
+Corp maintainers own the standards repo. They publish reusable policies, completion gates, contexts, skills, playbooks, packs, profiles, repo registry entries, source pins, and governance defaults.
 
 ## Produces
 
@@ -28,4 +28,4 @@ team-agents audit --workspace /path/to/repo --json
 
 ## Boundaries
 
-Corp maintainers define standards and governance. They do not use `team-agents` as an Agent OS, task runner, workflow executor, memory store, scheduler, or hosted governance service.
+Corp maintainers define standards and governance. They do not use `team-agents` as a task runner, workflow executor, memory store, scheduler, or hosted governance service.
