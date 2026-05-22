@@ -281,7 +281,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["human", "cursor", "claude", "codex", "harness", "workflow-engine", "ci-governance"]
+            "enum": ["human", "cursor", "claude", "codex", "ci-governance"]
           }
         }
       }

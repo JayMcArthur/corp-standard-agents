@@ -10,24 +10,17 @@ from team_agents.git_tools import ensure_git_exclude, has_tracked_prefix, is_tra
 from team_agents.machine import load_machine_config
 from team_agents.models import Item, ResolutionResult
 from team_agents.emitters import claude, codex, cursor
-from team_agents.emitters.common import resolve_tool_targets
 from team_agents.resolution_schema import validate_resolution_json
-
-
-ROUTER_TARGETS = {
-    "codex": "AGENTS.md",
-    "claude": "CLAUDE.md",
-    "cursor": ".cursor/rules/team-agents.mdc",
-}
-ROUTER_FILES = tuple(ROUTER_TARGETS.values())
+from team_agents.target_emission import ROUTER_FILES, ROUTER_TARGETS, build_workspace_emission_plan
 
 
 def write_sync_output(result: ResolutionResult) -> list[Path]:
-    workspace_root = result.workspace_context.git_root or result.workspace_context.workspace
-    repo_class = result.workspace_context.repo_class or "internal"
-    ensure_write_safety(result, workspace_root)
     machine_config = load_machine_config()
-    tool_targets = resolve_tool_targets(machine_config.default_tool_target)
+    plan = build_workspace_emission_plan(result, machine_config)
+    assert plan.workspace_root is not None
+    workspace_root = plan.workspace_root
+    repo_class = plan.repo_class
+    ensure_write_safety(result, workspace_root)
     agents_dir = workspace_root / ".agents"
     paths: list[Path] = []
     agents_dir.mkdir(parents=True, exist_ok=True)
@@ -35,7 +28,7 @@ def write_sync_output(result: ResolutionResult) -> list[Path]:
     paths.append(write_resolution_json(result, agents_dir))
     paths.extend(write_bootstrap_output(result, agents_dir, repo_class))
     paths.extend(write_item_outputs(result, agents_dir, repo_class))
-    paths.extend(write_tool_routers(result, workspace_root, repo_class, tool_targets))
+    paths.extend(write_tool_routers(result, workspace_root, repo_class, plan.targets))
     paths.append(write_artifact_manifest(result, workspace_root, paths))
     return paths
 

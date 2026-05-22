@@ -27,7 +27,10 @@ class PackagePositioningTests(unittest.TestCase):
         self.assertIn("Author A Standard", readme)
         self.assertIn("local user layer", readme.lower())
         self.assertIn("profiles and jobs", readme.lower())
-        self.assertIn("Integration Views", readme)
+        self.assertIn("## Integration", readme)
+        self.assertIn("canonical resolution JSON", readme)
+        self.assertNotIn("--for-harness", readme)
+        self.assertNotIn("--for-workflow-engine", readme)
 
     def test_product_docs_do_not_point_to_completed_task_lists(self) -> None:
         for relative in ["README.md", "CONTEXT.md", "CONTRIBUTING.md", "CHANGELOG.md"]:

@@ -5,13 +5,13 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
+from team_agents.activation import apply_enabled_override, select_activations
 from team_agents.errors import ResolutionError, ValidationError
 from team_agents.git_tools import find_git_root, list_normalized_remotes
 from team_agents.models import (
     CorpRepo,
     Item,
     ItemOverride,
-    LayerConfig,
     LayerData,
     MachineConfig,
     ResolutionResult,
@@ -22,7 +22,6 @@ from team_agents.models import (
     WorkspaceContext,
 )
 from team_agents.sources import load_source_items, materialize_source
-from team_agents.validation import validate_canonical_id
 
 
 def build_workspace_context(workspace: Path, corp: CorpRepo, user: UserLayer) -> WorkspaceContext:
@@ -88,201 +87,43 @@ def resolve_workspace(
     activation_layers = activation_layer_order(layers, profile_layers)
     enabled_sources = merge_sources(layers)
     resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
-    enabled_skills, skill_activations = merge_set_fields(activation_layers, "enabled_skills", "disabled_skills")
-    optional_policies, policy_activations = merge_set_fields(activation_layers, "optional_policies", "disabled_optional_policies")
-    contexts, context_activations = merge_set_fields(activation_layers, "contexts", "disabled_contexts")
-    optional_completion_gates, completion_gate_activations = merge_set_fields(
-        activation_layers, "optional_completion_gates", "disabled_optional_completion_gates"
+    activation = select_activations(
+        activation_layers=activation_layers,
+        resolved_items=resolved_items,
+        org_config=corp.org.config,
+        user_config=user.layer.config,
+        is_unknown_workspace=context.is_unknown,
+        binding_disabled_skills=context.binding_disabled_skills,
     )
-    enabled_packs, pack_activations = merge_set_fields(activation_layers, "enabled_packs", "disabled_packs")
-    enabled_playbooks, playbook_activations = merge_set_fields(activation_layers, "enabled_playbooks", "disabled_playbooks")
-    enabled_profiles, profile_activations = merge_set_fields(activation_layers, "enabled_profiles", "disabled_profiles")
-    baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
-    baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
-    required_completion_gates = merge_required_field(activation_layers, "required_completion_gates")
-    required_completion_gate_activations = activation_map_for_required(activation_layers, "required_completion_gates")
-    required_packs = merge_required_field(activation_layers, "required_packs")
-    required_pack_activations = activation_map_for_required(activation_layers, "required_packs")
-    if context.is_unknown:
-        user_layer = user.layer.config
-        enabled_skills = (set(corp.org.config.minimal_enabled_skills) | set(user_layer.enabled_skills)) - set(user_layer.disabled_skills)
-        optional_policies = (set(corp.org.config.minimal_optional_policies) | set(user_layer.optional_policies)) - set(
-            user_layer.disabled_optional_policies
-        )
-        contexts = (set(corp.org.config.minimal_contexts) | set(user_layer.contexts)) - set(user_layer.disabled_contexts)
-        optional_completion_gates = set(user_layer.optional_completion_gates) - set(user_layer.disabled_optional_completion_gates)
-        enabled_packs = set(user_layer.enabled_packs) - set(user_layer.disabled_packs)
-        enabled_playbooks = set(user_layer.enabled_playbooks) - set(user_layer.disabled_playbooks)
-        enabled_profiles = set(user_layer.enabled_profiles) - set(user_layer.disabled_profiles)
-        skill_activations = activation_map_for_unknown(
-            corp.org.config.minimal_enabled_skills,
-            user_layer.enabled_skills,
-            user_layer.disabled_skills,
-            corp.org.config,
-            user_layer,
-        )
-        policy_activations = activation_map_for_unknown(
-            corp.org.config.minimal_optional_policies,
-            user_layer.optional_policies,
-            user_layer.disabled_optional_policies,
-            corp.org.config,
-            user_layer,
-        )
-        context_activations = activation_map_for_unknown(
-            corp.org.config.minimal_contexts,
-            user_layer.contexts,
-            user_layer.disabled_contexts,
-            corp.org.config,
-            user_layer,
-        )
-        completion_gate_activations = activation_map_for_unknown(
-            [],
-            user_layer.optional_completion_gates,
-            user_layer.disabled_optional_completion_gates,
-            corp.org.config,
-            user_layer,
-        )
-        pack_activations = activation_map_for_unknown(
-            [],
-            user_layer.enabled_packs,
-            user_layer.disabled_packs,
-            corp.org.config,
-            user_layer,
-        )
-        playbook_activations = activation_map_for_unknown(
-            [],
-            user_layer.enabled_playbooks,
-            user_layer.disabled_playbooks,
-            corp.org.config,
-            user_layer,
-        )
-        profile_activations = activation_map_for_unknown(
-            [],
-            user_layer.enabled_profiles,
-            user_layer.disabled_profiles,
-            corp.org.config,
-            user_layer,
-        )
-    if context.binding_disabled_skills:
-        enabled_skills = set(enabled_skills) - set(context.binding_disabled_skills)
-        for item_id in list(skill_activations):
-            if item_id in context.binding_disabled_skills:
-                skill_activations.pop(item_id, None)
-    active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
-    active_completion_gate_ids = required_completion_gates + [
-        item_id for item_id in optional_completion_gates if item_id not in required_completion_gates
-    ]
-    active_pack_ids = required_packs + [item_id for item_id in enabled_packs if item_id not in required_packs]
-    pack_expansion_activations: dict[str, list[str]] = {}
-    pack_required_items: set[str] = set()
-    if active_pack_ids:
-        pack_source_activations = merge_activation_maps(pack_activations, required_pack_activations)
-        pack_expansion = expand_pack_contents(active_pack_ids, resolved_items, pack_source_activations)
-        enabled_skills.update(pack_expansion["enabled_skills"])
-        optional_policies.update(pack_expansion["optional_policies"])
-        contexts.update(pack_expansion["contexts"])
-        optional_completion_gates.update(pack_expansion["optional_completion_gates"])
-        enabled_packs.update(pack_expansion["enabled_packs"])
-        enabled_playbooks.update(pack_expansion["enabled_playbooks"])
-        for item_id in pack_expansion["baseline_policies"]:
-            if item_id not in active_policy_ids:
-                active_policy_ids.append(item_id)
-        for item_id in pack_expansion["required_completion_gates"]:
-            if item_id not in active_completion_gate_ids:
-                active_completion_gate_ids.append(item_id)
-        for item_id in pack_expansion["required_packs"]:
-            if item_id not in active_pack_ids:
-                active_pack_ids.append(item_id)
-        for item_id in pack_expansion["active_packs"]:
-            if item_id not in active_pack_ids:
-                active_pack_ids.append(item_id)
-        pack_expansion_activations = pack_expansion["activations"]
-        pack_required_items = set(pack_expansion["required_items"])
-    for item_id in optional_policies:
-        if item_id not in active_policy_ids:
-            active_policy_ids.append(item_id)
-    for item_id in optional_completion_gates:
-        if item_id not in active_completion_gate_ids:
-            active_completion_gate_ids.append(item_id)
-    for item_id in enabled_packs:
-        if item_id not in active_pack_ids:
-            active_pack_ids.append(item_id)
-    activation_reasons: dict[str, str] = {}
-    for item_id in set(baseline_policies) | set(required_completion_gates) | set(required_packs) | pack_required_items:
-        activation_reasons[item_id] = "required"
-    for item_id in (
-        set(enabled_skills)
-        | set(optional_policies)
-        | set(contexts)
-        | set(optional_completion_gates)
-        | set(enabled_packs)
-        | set(enabled_playbooks)
-        | set(enabled_profiles)
-    ):
-        activation_reasons.setdefault(item_id, "enabled")
-    recommended_agent_types = merge_recommended_agent_types(activation_layers, unknown_only=context.is_unknown)
-    recommended_items = merge_recommended_item_ids(activation_layers)
-    active_ids = (
-        set(enabled_skills)
-        | set(active_policy_ids)
-        | set(contexts)
-        | set(active_completion_gate_ids)
-        | set(active_pack_ids)
-        | set(enabled_playbooks)
-        | set(enabled_profiles)
-    )
-    activation_map: dict[str, list[str]] = {}
-    for mapping in [
-        skill_activations,
-        policy_activations,
-        context_activations,
-        completion_gate_activations,
-        pack_activations,
-        playbook_activations,
-        profile_activations,
-        baseline_policy_activations,
-        required_completion_gate_activations,
-        required_pack_activations,
-        pack_expansion_activations,
-    ]:
-        for item_id, refs in mapping.items():
-            activation_map.setdefault(item_id, [])
-            for ref in refs:
-                if ref not in activation_map[item_id]:
-                    activation_map[item_id].append(ref)
     active_items: dict[str, ResolvedItem] = {}
     denied_items: dict[str, ResolvedItem] = {}
     warnings: list[str] = []
-    for item_id in active_ids:
+    for item_id in activation.active_ids:
         resolved = resolved_items.get(item_id)
         if resolved is None:
             raise ResolutionError(f"Missing referenced item: {item_id}")
         apply_enabled_override(resolved, activation_layers)
         if not resolved.active:
-            resolved.activated_by = activation_map.get(item_id, [])
-            resolved.activation_reason = activation_reasons.get(item_id)
+            resolved.activated_by = activation.activation_map.get(item_id, [])
+            resolved.activation_reason = activation.activation_reasons.get(item_id)
             denied_items[item_id] = resolved
             continue
         denial = evaluate_item_eligibility(
             context,
             resolved,
-            item_id in baseline_policies
-            or item_id in required_completion_gates
-            or item_id in required_packs
-            or item_id in pack_required_items,
+            item_id in activation.required_item_ids,
         )
         if denial:
             resolved.denied_reason = denial
-            resolved.activated_by = activation_map.get(item_id, [])
-            resolved.activation_reason = activation_reasons.get(item_id)
+            resolved.activated_by = activation.activation_map.get(item_id, [])
+            resolved.activation_reason = activation.activation_reasons.get(item_id)
             denied_items[item_id] = resolved
             raise ResolutionError(f"{item_id} is not allowed in this workspace: {denial}")
-            continue
-        resolved.activated_by = activation_map.get(item_id, [])
-        resolved.activation_reason = activation_reasons.get(item_id)
+        resolved.activated_by = activation.activation_map.get(item_id, [])
+        resolved.activation_reason = activation.activation_reasons.get(item_id)
         active_items[item_id] = resolved
     for item_id, resolved in resolved_items.items():
-        if item_id not in active_ids and resolved.denied_reason:
+        if item_id not in activation.active_ids and resolved.denied_reason:
             denied_items[item_id] = resolved
     if any(
         override.item_id in set(corp.org.config.baseline_policies + corp.org.config.required_completion_gates + corp.org.config.required_packs)
@@ -306,15 +147,17 @@ def resolve_workspace(
         ],
         enabled_sources=enabled_sources,
         source_details=source_details,
-        enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
-        active_policies=sorted(item_id for item_id in active_policy_ids if item_id in active_items),
-        active_contexts=sorted(item_id for item_id in contexts if item_id in active_items),
-        active_completion_gates=sorted(item_id for item_id in active_completion_gate_ids if item_id in active_items),
-        active_packs=sorted(item_id for item_id in active_pack_ids if item_id in active_items),
-        active_playbooks=sorted(item_id for item_id in enabled_playbooks if item_id in active_items),
-        active_profiles=sorted(item_id for item_id in enabled_profiles if item_id in active_items),
-        recommended_items=sorted(item_id for item_id in recommended_items if item_id in resolved_items and item_id not in active_items),
-        recommended_agent_types=recommended_agent_types,
+        enabled_skills=sorted(item_id for item_id in activation.enabled_skills if item_id in active_items),
+        active_policies=sorted(item_id for item_id in activation.active_policy_ids if item_id in active_items),
+        active_contexts=sorted(item_id for item_id in activation.active_context_ids if item_id in active_items),
+        active_completion_gates=sorted(item_id for item_id in activation.active_completion_gate_ids if item_id in active_items),
+        active_packs=sorted(item_id for item_id in activation.active_pack_ids if item_id in active_items),
+        active_playbooks=sorted(item_id for item_id in activation.active_playbook_ids if item_id in active_items),
+        active_profiles=sorted(item_id for item_id in activation.active_profile_ids if item_id in active_items),
+        recommended_items=sorted(
+            item_id for item_id in activation.recommended_item_ids if item_id in resolved_items and item_id not in active_items
+        ),
+        recommended_agent_types=activation.recommended_agent_types,
         items=active_items,
         denied_items=denied_items,
         warnings=warnings,
@@ -339,112 +182,22 @@ def resolve_user_global(
     activation_layers = layers
     enabled_sources = merge_sources(layers)
     resolved_items, source_details = gather_items(layers, enabled_sources, machine_config, corp, user)
-    enabled_skills, skill_activations = merge_set_fields(activation_layers, "enabled_skills", "disabled_skills")
-    optional_policies, policy_activations = merge_set_fields(activation_layers, "optional_policies", "disabled_optional_policies")
-    contexts, context_activations = merge_set_fields(activation_layers, "contexts", "disabled_contexts")
-    optional_completion_gates, completion_gate_activations = merge_set_fields(
-        activation_layers, "optional_completion_gates", "disabled_optional_completion_gates"
+    activation = select_activations(
+        activation_layers=activation_layers,
+        resolved_items=resolved_items,
+        org_config=corp.org.config,
+        user_config=user.layer.config,
+        is_unknown_workspace=False,
     )
-    enabled_packs, pack_activations = merge_set_fields(activation_layers, "enabled_packs", "disabled_packs")
-    enabled_playbooks, playbook_activations = merge_set_fields(activation_layers, "enabled_playbooks", "disabled_playbooks")
-    enabled_profiles, profile_activations = merge_set_fields(activation_layers, "enabled_profiles", "disabled_profiles")
-    baseline_policies = list(dict.fromkeys(corp.org.config.baseline_policies))
-    baseline_policy_activations = {item_id: [layer_ref(corp.org.config)] for item_id in baseline_policies}
-    required_completion_gates = merge_required_field(activation_layers, "required_completion_gates")
-    required_completion_gate_activations = activation_map_for_required(activation_layers, "required_completion_gates")
-    required_packs = merge_required_field(activation_layers, "required_packs")
-    required_pack_activations = activation_map_for_required(activation_layers, "required_packs")
-    active_policy_ids = baseline_policies + [item_id for item_id in optional_policies if item_id not in baseline_policies]
-    active_completion_gate_ids = required_completion_gates + [
-        item_id for item_id in optional_completion_gates if item_id not in required_completion_gates
-    ]
-    active_pack_ids = required_packs + [item_id for item_id in enabled_packs if item_id not in required_packs]
-    pack_expansion_activations: dict[str, list[str]] = {}
-    pack_required_items: set[str] = set()
-    if active_pack_ids:
-        pack_source_activations = merge_activation_maps(pack_activations, required_pack_activations)
-        pack_expansion = expand_pack_contents(active_pack_ids, resolved_items, pack_source_activations)
-        enabled_skills.update(pack_expansion["enabled_skills"])
-        optional_policies.update(pack_expansion["optional_policies"])
-        contexts.update(pack_expansion["contexts"])
-        optional_completion_gates.update(pack_expansion["optional_completion_gates"])
-        enabled_packs.update(pack_expansion["enabled_packs"])
-        enabled_playbooks.update(pack_expansion["enabled_playbooks"])
-        for item_id in pack_expansion["baseline_policies"]:
-            if item_id not in active_policy_ids:
-                active_policy_ids.append(item_id)
-        for item_id in pack_expansion["required_completion_gates"]:
-            if item_id not in active_completion_gate_ids:
-                active_completion_gate_ids.append(item_id)
-        for item_id in pack_expansion["required_packs"]:
-            if item_id not in active_pack_ids:
-                active_pack_ids.append(item_id)
-        for item_id in pack_expansion["active_packs"]:
-            if item_id not in active_pack_ids:
-                active_pack_ids.append(item_id)
-        pack_expansion_activations = pack_expansion["activations"]
-        pack_required_items = set(pack_expansion["required_items"])
-    for item_id in optional_policies:
-        if item_id not in active_policy_ids:
-            active_policy_ids.append(item_id)
-    for item_id in optional_completion_gates:
-        if item_id not in active_completion_gate_ids:
-            active_completion_gate_ids.append(item_id)
-    for item_id in enabled_packs:
-        if item_id not in active_pack_ids:
-            active_pack_ids.append(item_id)
-    activation_reasons: dict[str, str] = {}
-    for item_id in set(baseline_policies) | set(required_completion_gates) | set(required_packs) | pack_required_items:
-        activation_reasons[item_id] = "required"
-    for item_id in (
-        set(enabled_skills)
-        | set(optional_policies)
-        | set(contexts)
-        | set(optional_completion_gates)
-        | set(enabled_packs)
-        | set(enabled_playbooks)
-        | set(enabled_profiles)
-    ):
-        activation_reasons.setdefault(item_id, "enabled")
-    recommended_agent_types = merge_recommended_agent_types(activation_layers, unknown_only=False)
-    recommended_items = merge_recommended_item_ids(activation_layers)
-    active_ids = (
-        set(enabled_skills)
-        | set(active_policy_ids)
-        | set(contexts)
-        | set(active_completion_gate_ids)
-        | set(active_pack_ids)
-        | set(enabled_playbooks)
-        | set(enabled_profiles)
-    )
-    activation_map: dict[str, list[str]] = {}
-    for mapping in [
-        skill_activations,
-        policy_activations,
-        context_activations,
-        completion_gate_activations,
-        pack_activations,
-        playbook_activations,
-        profile_activations,
-        baseline_policy_activations,
-        required_completion_gate_activations,
-        required_pack_activations,
-        pack_expansion_activations,
-    ]:
-        for item_id, refs in mapping.items():
-            activation_map.setdefault(item_id, [])
-            for ref in refs:
-                if ref not in activation_map[item_id]:
-                    activation_map[item_id].append(ref)
     active_items: dict[str, ResolvedItem] = {}
     denied_items: dict[str, ResolvedItem] = {}
-    for item_id in active_ids:
+    for item_id in activation.active_ids:
         resolved = resolved_items.get(item_id)
         if resolved is None:
             raise ResolutionError(f"Missing referenced item: {item_id}")
         apply_enabled_override(resolved, activation_layers)
-        resolved.activated_by = activation_map.get(item_id, [])
-        resolved.activation_reason = activation_reasons.get(item_id)
+        resolved.activated_by = activation.activation_map.get(item_id, [])
+        resolved.activation_reason = activation.activation_reasons.get(item_id)
         if resolved.active:
             active_items[item_id] = resolved
         else:
@@ -464,15 +217,17 @@ def resolve_user_global(
         ],
         enabled_sources=enabled_sources,
         source_details=source_details,
-        enabled_skills=sorted(item_id for item_id in enabled_skills if item_id in active_items),
-        active_policies=sorted(item_id for item_id in active_policy_ids if item_id in active_items),
-        active_contexts=sorted(item_id for item_id in contexts if item_id in active_items),
-        active_completion_gates=sorted(item_id for item_id in active_completion_gate_ids if item_id in active_items),
-        active_packs=sorted(item_id for item_id in active_pack_ids if item_id in active_items),
-        active_playbooks=sorted(item_id for item_id in enabled_playbooks if item_id in active_items),
-        active_profiles=sorted(item_id for item_id in enabled_profiles if item_id in active_items),
-        recommended_items=sorted(item_id for item_id in recommended_items if item_id in resolved_items and item_id not in active_items),
-        recommended_agent_types=recommended_agent_types,
+        enabled_skills=sorted(item_id for item_id in activation.enabled_skills if item_id in active_items),
+        active_policies=sorted(item_id for item_id in activation.active_policy_ids if item_id in active_items),
+        active_contexts=sorted(item_id for item_id in activation.active_context_ids if item_id in active_items),
+        active_completion_gates=sorted(item_id for item_id in activation.active_completion_gate_ids if item_id in active_items),
+        active_packs=sorted(item_id for item_id in activation.active_pack_ids if item_id in active_items),
+        active_playbooks=sorted(item_id for item_id in activation.active_playbook_ids if item_id in active_items),
+        active_profiles=sorted(item_id for item_id in activation.active_profile_ids if item_id in active_items),
+        recommended_items=sorted(
+            item_id for item_id in activation.recommended_item_ids if item_id in resolved_items and item_id not in active_items
+        ),
+        recommended_agent_types=activation.recommended_agent_types,
         items=active_items,
         denied_items=denied_items,
         warnings=evaluate_compatibility_warnings(active_items, activation_layers),
@@ -620,205 +375,6 @@ def merge_sources(layers: list[LayerData]) -> list[str]:
     return [source_id for source_id in enabled if source_id not in disabled]
 
 
-def merge_set_fields(layers: list[LayerData], enabled_field: str, disabled_field: str) -> tuple[set[str], dict[str, list[str]]]:
-    enabled: list[str] = []
-    disabled: set[str] = set()
-    activations: dict[str, list[str]] = {}
-    for layer in layers:
-        for item_id in getattr(layer.config, enabled_field):
-            if item_id not in enabled:
-                enabled.append(item_id)
-            activations.setdefault(item_id, [])
-            ref = layer_ref(layer.config)
-            if ref not in activations[item_id]:
-                activations[item_id].append(ref)
-        disabled.update(getattr(layer.config, disabled_field))
-    filtered = {item_id for item_id in enabled if item_id not in disabled}
-    return filtered, {item_id: refs for item_id, refs in activations.items() if item_id in filtered}
-
-
-def merge_required_field(layers: list[LayerData], field: str) -> list[str]:
-    values: list[str] = []
-    for layer in layers:
-        for item_id in getattr(layer.config, field):
-            if item_id not in values:
-                values.append(item_id)
-    return values
-
-
-def activation_map_for_required(layers: list[LayerData], field: str) -> dict[str, list[str]]:
-    activations: dict[str, list[str]] = {}
-    for layer in layers:
-        ref = layer_ref(layer.config)
-        for item_id in getattr(layer.config, field):
-            activations.setdefault(item_id, [])
-            if ref not in activations[item_id]:
-                activations[item_id].append(ref)
-    return activations
-
-
-def merge_activation_maps(*maps: dict[str, list[str]]) -> dict[str, list[str]]:
-    merged: dict[str, list[str]] = {}
-    for mapping in maps:
-        for item_id, refs in mapping.items():
-            merged.setdefault(item_id, [])
-            for ref in refs:
-                if ref not in merged[item_id]:
-                    merged[item_id].append(ref)
-    return merged
-
-
-def expand_pack_contents(
-    initial_pack_ids: list[str],
-    resolved_items: dict[str, ResolvedItem],
-    pack_source_activations: dict[str, list[str]],
-) -> dict[str, object]:
-    expanded: dict[str, object] = {
-        "enabled_skills": set(),
-        "baseline_policies": set(),
-        "optional_policies": set(),
-        "contexts": set(),
-        "required_completion_gates": set(),
-        "optional_completion_gates": set(),
-        "required_packs": set(),
-        "enabled_packs": set(),
-        "enabled_playbooks": set(),
-        "active_packs": set(initial_pack_ids),
-        "required_items": set(),
-        "activations": {},
-    }
-    visiting: list[str] = []
-    visited: set[str] = set()
-
-    def add_activation(item_id: str, refs: list[str]) -> None:
-        activations = expanded["activations"]
-        assert isinstance(activations, dict)
-        activations.setdefault(item_id, [])
-        for ref in refs:
-            if ref not in activations[item_id]:
-                activations[item_id].append(ref)
-
-    def refs_for_pack(pack_id: str) -> list[str]:
-        refs = list(pack_source_activations.get(pack_id, []))
-        pack_ref = f"pack:{pack_id}"
-        if pack_ref not in refs:
-            refs.append(pack_ref)
-        return refs
-
-    def activate_reference(pack_id: str, item_id: str, mode: str) -> None:
-        _, _, kind, _ = validate_canonical_id(item_id)
-        if kind == "profile":
-            raise ResolutionError(f"Pack {pack_id} cannot activate profile item {item_id}")
-        if mode == "required" and kind not in {"policy", "completion_gate", "pack"}:
-            raise ResolutionError(f"Pack {pack_id} cannot require {kind} item {item_id}")
-        field_by_kind = {
-            "skill": "enabled_skills",
-            "policy": "baseline_policies" if mode == "required" else "optional_policies",
-            "context": "contexts",
-            "completion_gate": "required_completion_gates" if mode == "required" else "optional_completion_gates",
-            "pack": "required_packs" if mode == "required" else "enabled_packs",
-            "playbook": "enabled_playbooks",
-        }
-        field = field_by_kind[kind]
-        target = expanded[field]
-        assert isinstance(target, set)
-        target.add(item_id)
-        if mode == "required":
-            required_items = expanded["required_items"]
-            assert isinstance(required_items, set)
-            required_items.add(item_id)
-        refs = refs_for_pack(pack_id)
-        add_activation(item_id, refs)
-        if kind == "pack":
-            active_packs = expanded["active_packs"]
-            assert isinstance(active_packs, set)
-            active_packs.add(item_id)
-            pack_source_activations.setdefault(item_id, [])
-            for ref in refs:
-                if ref not in pack_source_activations[item_id]:
-                    pack_source_activations[item_id].append(ref)
-            visit(item_id)
-
-    def visit(pack_id: str) -> None:
-        if pack_id in visiting:
-            cycle = visiting[visiting.index(pack_id) :] + [pack_id]
-            raise ResolutionError(f"Circular pack reference detected: {' -> '.join(cycle)}")
-        if pack_id in visited:
-            return
-        resolved = resolved_items.get(pack_id)
-        if resolved is None:
-            raise ResolutionError(f"Missing referenced item: {pack_id}")
-        if resolved.item.kind != "pack":
-            raise ResolutionError(f"Pack activation referenced non-pack item as pack: {pack_id}")
-        visiting.append(pack_id)
-        for item_id in resolved.item.activation_required:
-            activate_reference(pack_id, item_id, "required")
-        for item_id in resolved.item.activation_enabled:
-            activate_reference(pack_id, item_id, "enabled")
-        visiting.pop()
-        visited.add(pack_id)
-
-    for pack_id in initial_pack_ids:
-        visit(pack_id)
-    return expanded
-
-
-def merge_recommended_agent_types(layers: list[LayerData], unknown_only: bool) -> list[str]:
-    values: list[str] = []
-    for layer in layers:
-        source = layer.config.recommended_agent_types
-        if unknown_only and layer.config.layer_name not in {"org", "user"}:
-            continue
-        for agent_type in source:
-            if agent_type not in values:
-                values.append(agent_type)
-    return values
-
-
-def merge_recommended_item_ids(layers: list[LayerData]) -> list[str]:
-    fields = [
-        "recommended_skills",
-        "recommended_policies",
-        "recommended_contexts",
-        "recommended_completion_gates",
-        "recommended_packs",
-        "recommended_playbooks",
-        "recommended_profiles",
-    ]
-    values: list[str] = []
-    for layer in layers:
-        for field in fields:
-            for item_id in getattr(layer.config, field):
-                if item_id not in values:
-                    values.append(item_id)
-    return values
-
-
-def activation_map_for_unknown(
-    org_values: list[str],
-    user_values: list[str],
-    user_disabled: list[str],
-    org_config: LayerConfig,
-    user_config: LayerConfig,
-) -> dict[str, list[str]]:
-    refs: dict[str, list[str]] = {}
-    for item_id in org_values:
-        refs.setdefault(item_id, []).append(layer_ref(org_config))
-    for item_id in user_values:
-        refs.setdefault(item_id, [])
-        user_ref = layer_ref(user_config)
-        if user_ref not in refs[item_id]:
-            refs[item_id].append(user_ref)
-    for item_id in list(refs):
-        if item_id in user_disabled:
-            refs.pop(item_id, None)
-    return refs
-
-
-def layer_ref(config: LayerConfig) -> str:
-    return f"{config.layer_name}:{config.identifier}"
-
-
 def gather_items(
     layers: list[LayerData],
     enabled_sources: list[str],
@@ -880,13 +436,6 @@ def apply_field_override(resolved: ResolvedItem, override: ItemOverride, layer_n
     if resolved.status == "direct":
         resolved.status = "field-overridden"
     resolved.overridden_by.append(layer_name)
-
-
-def apply_enabled_override(resolved: ResolvedItem, layers: list[LayerData]) -> None:
-    for layer in layers:
-        for override in layer.config.item_overrides:
-            if override.item_id == resolved.item.item_id and override.enabled is False:
-                resolved.active = False
 
 
 def evaluate_item_eligibility(context: WorkspaceContext, resolved: ResolvedItem, is_baseline_policy: bool) -> str | None:

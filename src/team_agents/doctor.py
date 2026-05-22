@@ -14,7 +14,7 @@ from team_agents.git_tools import find_git_root, has_tracked_prefix, is_tracked,
 from team_agents.loaders import load_corp_repo
 from team_agents.materialization import effective_materialization_strategy, materialization_warnings
 from team_agents.models import MachineConfig, ResolutionResult
-from team_agents.output import ROUTER_FILES
+from team_agents.target_emission import ROUTER_FILES
 
 
 def run_doctor(
@@ -89,7 +89,6 @@ def run_doctor(
     policy_compliance: list[dict[str, Any]] = []
     completion_gate_compliance: list[dict[str, Any]] = []
     context_quality_warnings: list[dict[str, str]] = []
-    consumer_safety_warnings: list[dict[str, str]] = []
     if resolution is not None:
         repo_match_check = evaluate_workspace_repo_match(corp_root, git_root, resolution)
         if repo_match_check is not None:
@@ -145,13 +144,6 @@ def run_doctor(
                 "warn",
                 f"{warning['detail']} Remediation: {warning['remediation']}",
             )
-        consumer_safety_warnings = evaluate_consumer_safety_warnings(resolution)
-        for warning in consumer_safety_warnings:
-            add_check(
-                f"consumer-safety:{warning['code']}",
-                "warn",
-                f"{warning['detail']} Remediation: {warning['remediation']}",
-            )
     summary = {
         "ok": sum(1 for check in checks if check["status"] == "ok"),
         "warn": sum(1 for check in checks if check["status"] == "warn"),
@@ -180,7 +172,6 @@ def run_doctor(
         "policy_compliance": policy_compliance,
         "completion_gate_compliance": completion_gate_compliance,
         "context_quality_warnings": context_quality_warnings,
-        "consumer_safety_warnings": consumer_safety_warnings,
     }
     if resolution is not None:
         result["resolution"] = {
@@ -329,34 +320,7 @@ def doctor_text(report: dict[str, Any]) -> str:
         lines.extend(["", "context-quality:"])
         for warning in report["context_quality_warnings"]:
             lines.append(f"- [warn] {warning['code']}: {warning['detail']} (remediation: {warning['remediation']})")
-    if report.get("consumer_safety_warnings"):
-        lines.extend(["", "consumer-safety:"])
-        for warning in report["consumer_safety_warnings"]:
-            lines.append(f"- [warn] {warning['code']}: {warning['detail']} (remediation: {warning['remediation']})")
     return "\n".join(lines)
-
-
-HIGH_RISK_CONSUMERS = {"harness", "harnesses", "workflow-engine", "workflow_engines"}
-
-
-def evaluate_consumer_safety_warnings(resolution: ResolutionResult) -> list[dict[str, str]]:
-    warnings: list[dict[str, str]] = []
-    for profile in resolution.selected_profile_configs:
-        high_risk = set(profile.intended_consumers) & HIGH_RISK_CONSUMERS
-        if not high_risk:
-            continue
-        high_risk_labels = sorted(high_risk)
-        if not profile.stop_conditions:
-            warnings.append(
-                {
-                    "code": "missing-consumer-stop-conditions",
-                    "profile": profile.identifier,
-                    "consumers": ", ".join(high_risk_labels),
-                    "detail": f"profile {profile.identifier} targets high-risk consumers without stop_conditions",
-                    "remediation": "add stop_conditions for harness or workflow-engine use",
-                }
-            )
-    return warnings
 
 
 def evaluate_context_quality(resolution: ResolutionResult) -> list[dict[str, str]]:

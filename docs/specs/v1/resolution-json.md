@@ -9,10 +9,9 @@ This document freezes the `resolution.json` output contract for team-agents v1. 
 
 `resolution.json` is the machine-readable summary written under `.agents/` and consumed by:
 
-- agent runtimes
 - `team-agents audit`
 - `team-agents doctor`
-- CI, harness, workflow-engine, and downstream tooling that needs to inspect resolved provenance
+- CI, governance checks, editors, and downstream tooling that needs to inspect resolved provenance
 
 The canonical machine-readable schema lives at `docs/specs/v1/resolution-json.schema.json`. The runtime copy at `src/team_agents/schemas/resolution-json-v1.schema.json` and the public package copy at `schemas/resolution.schema.json` must stay byte-for-byte equivalent in meaning.
 

@@ -25,7 +25,7 @@ team-agents doctor --workspace /path/to/repo
 team-agents validate --workspace /path/to/repo
 ```
 
-Use `context --json` for the canonical resolution JSON. Use `--for-harness` or `--for-workflow-engine` for narrowed integration views.
+Use `context --json` for the canonical resolution JSON. External tools should adapt from that file or command output rather than expecting runtime-specific views from `team-agents`.
 
 ## Configuration Commands
 

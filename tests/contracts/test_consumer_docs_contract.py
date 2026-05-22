@@ -12,8 +12,6 @@ class ConsumerDocsContractTests(unittest.TestCase):
         for name in [
             "corp-maintainers.md",
             "developers.md",
-            "harnesses.md",
-            "workflow-engines.md",
             "ci-governance.md",
         ]:
             with self.subTest(name=name):

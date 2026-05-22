@@ -297,32 +297,13 @@ stop_conditions = ["ambiguous_requirement", "security_boundary_unclear"]
 
 Generated `.agents/index.md`, AGENTS.md, and `audit --json` surface active completion gate and playbook evidence requirements before work is called done. `.agents/index.md` also renders active playbook inputs, outputs, and stop conditions. v1 does not execute playbooks or enforce collection automatically.
 
-Future harnesses should write episode evidence using the shape in `docs/specs/v1/episode-evidence-package.md`:
-
-```text
-.agents/episode/
-  task.md
-  context-used.json
-  verification.md
-  risks.md
-  decisions.md
-```
-
-Harnesses can request a narrowed constraint view without adding orchestration:
+External tools should consume canonical resolution JSON when they need selected standards, provenance, active playbooks, completion gates, evidence requirements, warnings, or denied items:
 
 ```bash
-team-agents context --workspace /path/to/repo --for-harness --json
+team-agents context --workspace /path/to/repo --profile reviewer --json
 ```
 
-That output packages selected profile/job metadata, required completion gates, evidence requirements, stop conditions, and denied/warning context. The integration contract is documented in `docs/specs/v1/harness-integration-contract.md`.
-
-Workflow engines can select a profile/job and read active playbooks and completion gates without adding execution to `team-agents`:
-
-```bash
-team-agents context --workspace /path/to/repo --profile reviewer --for-workflow-engine --json
-```
-
-That output packages the workflow boundary, selected profile/job metadata, active completion gates, playbook inputs and outputs, evidence requirements, stop conditions, warnings, and denied context. The integration contract is documented in `docs/specs/v1/workflow-engine-integration-contract.md`.
+Tool-specific execution, evidence storage, scheduling, permission enforcement, and task state stay outside `team-agents`.
 
 ## Workspace Bindings
 

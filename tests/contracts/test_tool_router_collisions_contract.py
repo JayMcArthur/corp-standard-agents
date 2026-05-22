@@ -8,7 +8,7 @@ from pathlib import Path
 from team_agents.errors import ResolutionError
 from team_agents.emitters.common import MANAGED_END, MANAGED_START, write_workspace_router_file
 from team_agents.models import ResolutionResult, WorkspaceContext
-from team_agents.output import ROUTER_FILES
+from team_agents.target_emission import ROUTER_FILES
 
 
 def git(path: Path, *args: str) -> str:

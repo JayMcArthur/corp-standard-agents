@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import json
 import re
 import sys
 from pathlib import Path
 
-from team_agents.consumer_contexts import build_harness_context, build_workflow_engine_context
+from team_agents.configuration import (
+    SkillCollision,
+    effective_standard_state,
+    layer_local_deltas,
+    merge_delta_values,
+    resolve_group_collisions,
+    resolve_repo_collisions,
+    unique_list,
+    validate_repo_group_id,
+)
 from team_agents.doctor import (
     doctor_json,
     doctor_text,
-    evaluate_consumer_safety_warnings,
     evaluate_context_quality,
     run_doctor,
 )
@@ -119,8 +126,6 @@ def build_parser() -> argparse.ArgumentParser:
     context = subparsers.add_parser("context")
     context.add_argument("--workspace", type=Path, default=Path.cwd())
     context.add_argument("--profile")
-    context.add_argument("--for-harness", action="store_true")
-    context.add_argument("--for-workflow-engine", action="store_true")
     context.add_argument("--json", action="store_true")
     context.add_argument("--pretty", action="store_true")
     context.set_defaults(func=cmd_context)
@@ -549,19 +554,8 @@ def cmd_registry(args: argparse.Namespace) -> int:
 
 
 def cmd_context(args: argparse.Namespace) -> int:
-    consumer_views = [args.for_harness, args.for_workflow_engine]
-    if sum(1 for enabled in consumer_views if enabled) > 1:
-        print("team-agents: choose only one consumer view", file=sys.stderr)
-        return 2
     result = load_resolution_for_workspace(args.workspace, profile=args.profile)
-    if args.for_harness:
-        payload = build_harness_context(result)
-    elif args.for_workflow_engine:
-        payload = build_workflow_engine_context(result)
-    else:
-        payload = result.to_dict()
-    if args.for_harness or args.for_workflow_engine:
-        payload["consumer_safety_warnings"] = evaluate_consumer_safety_warnings(result)
+    payload = result.to_dict()
     if args.pretty:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
@@ -833,7 +827,8 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         else base_recommended_agent_types
     )
     enabled_skills, disabled_skills = resolve_repo_collisions(
-        args=args,
+        json_mode=args.json,
+        prompt_losers=prompt_collision_losers,
         workspace=workspace,
         machine_config=machine_config,
         corp=corp,
@@ -898,23 +893,8 @@ def cmd_configure_repo(args: argparse.Namespace) -> int:
         reseed(machine_config, corp, user)
     resolution = resolve_workspace(workspace, machine_config, corp, user)
     repo_layer = corp.repos[repo_id].config
-    effective = {
-        "enabled_skills": resolution.enabled_skills,
-        "enabled_sources": resolution.enabled_sources,
-        "optional_policies": resolution.active_policies,
-        "contexts": resolution.active_contexts,
-        "recommended_agent_types": resolution.recommended_agent_types,
-    }
-    local_deltas = {
-        "enabled_skills": list(repo_layer.enabled_skills),
-        "disabled_skills": list(repo_layer.disabled_skills),
-        "enabled_sources": list(repo_layer.enabled_sources),
-        "disabled_sources": list(repo_layer.disabled_sources),
-        "optional_policies": list(repo_layer.optional_policies),
-        "disabled_optional_policies": list(repo_layer.disabled_optional_policies),
-        "contexts": list(repo_layer.contexts),
-        "recommended_agent_types": list(repo_layer.recommended_agent_types),
-    }
+    effective = effective_standard_state(resolution)
+    local_deltas = layer_local_deltas(repo_layer)
 
     payload = {
         "workspace": str(workspace),
@@ -983,7 +963,8 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
         else base_recommended_agent_types
     )
     enabled_skills, disabled_skills = resolve_group_collisions(
-        args=args,
+        json_mode=args.json,
+        prompt_losers=prompt_collision_losers,
         workspace=workspace,
         machine_config=machine_config,
         corp=corp,
@@ -1042,23 +1023,8 @@ def cmd_configure_group(args: argparse.Namespace) -> int:
 
     resolution = resolve_workspace(workspace, machine_config, corp, user)
     group_layer = corp.repo_groups[group_id].config
-    effective = {
-        "enabled_skills": resolution.enabled_skills,
-        "enabled_sources": resolution.enabled_sources,
-        "optional_policies": resolution.active_policies,
-        "contexts": resolution.active_contexts,
-        "recommended_agent_types": resolution.recommended_agent_types,
-    }
-    local_deltas = {
-        "enabled_skills": list(group_layer.enabled_skills),
-        "disabled_skills": list(group_layer.disabled_skills),
-        "enabled_sources": list(group_layer.enabled_sources),
-        "disabled_sources": list(group_layer.disabled_sources),
-        "optional_policies": list(group_layer.optional_policies),
-        "disabled_optional_policies": list(group_layer.disabled_optional_policies),
-        "contexts": list(group_layer.contexts),
-        "recommended_agent_types": list(group_layer.recommended_agent_types),
-    }
+    effective = effective_standard_state(resolution)
+    local_deltas = layer_local_deltas(group_layer)
     payload = {
         "workspace": str(workspace),
         "repo_id": repo_id,
@@ -1478,9 +1444,6 @@ def audit_governance_warnings(report: dict[str, object]) -> list[dict[str, str]]
     for entry in report.get("context_quality_warnings", []):
         if isinstance(entry, dict):
             warnings.append({"source": str(entry.get("code", "context-quality")), "detail": str(entry.get("detail", ""))})
-    for entry in report.get("consumer_safety_warnings", []):
-        if isinstance(entry, dict):
-            warnings.append({"source": str(entry.get("code", "consumer-safety")), "detail": str(entry.get("detail", ""))})
     return warnings
 
 
@@ -1558,7 +1521,6 @@ def build_audit_report(result: ResolutionResult) -> dict[str, object]:
     payload["standards_registry"] = build_standards_registry(result)
     payload["sprawl_warnings"] = build_sprawl_warnings(result)
     payload["context_quality_warnings"] = evaluate_context_quality(result)
-    payload["consumer_safety_warnings"] = evaluate_consumer_safety_warnings(result)
     return payload
 
 
@@ -1823,12 +1785,6 @@ def audit_text(report: dict[str, object]) -> str:
         lines.append("context-quality-warnings:")
         for warning in context_quality_warnings:
             lines.append(f"- {warning['code']}: {warning['detail']} (remediation: {warning['remediation']})")
-    consumer_safety_warnings = report.get("consumer_safety_warnings", [])
-    if consumer_safety_warnings:
-        lines.append("")
-        lines.append("consumer-safety-warnings:")
-        for warning in consumer_safety_warnings:
-            lines.append(f"- {warning['code']}: {warning['detail']} (remediation: {warning['remediation']})")
     return "\n".join(lines)
 
 
@@ -1898,14 +1854,6 @@ def derive_repo_id(normalized_remotes: list[str], workspace: Path) -> str:
     return slug or "repo"
 
 
-def unique_list(values: list[str]) -> list[str]:
-    ordered: list[str] = []
-    for value in values:
-        if value not in ordered:
-            ordered.append(value)
-    return ordered
-
-
 def resolve_onboard_inputs(
     *,
     args: argparse.Namespace,
@@ -1938,16 +1886,6 @@ def prompt_repo_id(normalized_remotes: list[str], workspace: Path) -> str:
     return value or default
 
 
-def merge_delta_values(base: list[str], additions: list[str] | None, removals: list[str] | None) -> list[str]:
-    values = list(base)
-    for value in additions or []:
-        if value not in values:
-            values.append(value)
-    if removals:
-        values = [value for value in values if value not in removals]
-    return values
-
-
 def resolve_group_repo_target(*, args: argparse.Namespace, context, corp: CorpRepo) -> str:
     if context.matched_repo_id:
         return context.matched_repo_id
@@ -1978,248 +1916,7 @@ def resolve_group_target(*, args: argparse.Namespace, repo_config: LayerConfig, 
     return group_id, "created"
 
 
-def resolve_repo_collisions(
-    *,
-    args: argparse.Namespace,
-    workspace: Path,
-    machine_config: MachineConfig,
-    corp: CorpRepo,
-    user: UserLayer,
-    repo_id: str,
-    repo_class: str,
-    repo_group_id: str | None,
-    normalized_remotes: list[str],
-    enabled_skills: list[str],
-    disabled_skills: list[str],
-    enabled_sources: list[str],
-    disabled_sources: list[str],
-    mode: str,
-) -> tuple[list[str], list[str]]:
-    while True:
-        simulated = simulate_repo_resolution(
-            workspace=workspace,
-            machine_config=machine_config,
-            corp=corp,
-            user=user,
-            repo_id=repo_id,
-            repo_class=repo_class,
-            repo_group_id=repo_group_id,
-            normalized_remotes=normalized_remotes,
-            enabled_skills=enabled_skills,
-            disabled_skills=disabled_skills,
-            enabled_sources=enabled_sources,
-            disabled_sources=disabled_sources,
-            mode=mode,
-        )
-        collisions = detect_skill_collisions(simulated)
-        if not collisions:
-            return enabled_skills, disabled_skills
-        if args.json:
-            raise TeamAgentsError(format_collision_error(collisions))
-        losers = prompt_collision_losers(collisions)
-        disabled_skills = merge_delta_values(disabled_skills, losers, None)
-        enabled_skills = [item_id for item_id in enabled_skills if item_id not in losers]
-
-
-def resolve_group_collisions(
-    *,
-    args: argparse.Namespace,
-    workspace: Path,
-    machine_config: MachineConfig,
-    corp: CorpRepo,
-    user: UserLayer,
-    repo_id: str,
-    group_id: str,
-    enabled_skills: list[str],
-    disabled_skills: list[str],
-    enabled_sources: list[str],
-    disabled_sources: list[str],
-    mode: str,
-) -> tuple[list[str], list[str]]:
-    while True:
-        simulated = simulate_group_resolution(
-            workspace=workspace,
-            machine_config=machine_config,
-            corp=corp,
-            user=user,
-            repo_id=repo_id,
-            group_id=group_id,
-            enabled_skills=enabled_skills,
-            disabled_skills=disabled_skills,
-            enabled_sources=enabled_sources,
-            disabled_sources=disabled_sources,
-            mode=mode,
-        )
-        collisions = detect_skill_collisions(simulated)
-        if not collisions:
-            return enabled_skills, disabled_skills
-        if args.json:
-            raise TeamAgentsError(format_collision_error(collisions))
-        losers = prompt_collision_losers(collisions)
-        disabled_skills = merge_delta_values(disabled_skills, losers, None)
-        enabled_skills = [item_id for item_id in enabled_skills if item_id not in losers]
-
-
-def simulate_repo_resolution(
-    *,
-    workspace: Path,
-    machine_config: MachineConfig,
-    corp: CorpRepo,
-    user: UserLayer,
-    repo_id: str,
-    repo_class: str,
-    repo_group_id: str | None,
-    normalized_remotes: list[str],
-    enabled_skills: list[str],
-    disabled_skills: list[str],
-    enabled_sources: list[str],
-    disabled_sources: list[str],
-    mode: str,
-) -> ResolutionResult:
-    corp_candidate = deepcopy(corp)
-    if mode == "created":
-        corp_candidate.repos[repo_id] = LayerData(
-            config=LayerConfig(
-                layer_name="repo",
-                layer_path=machine_config.corp_repo_path / "repos" / repo_id,
-                identifier=repo_id,
-                enabled_sources=list(enabled_sources),
-                disabled_sources=list(disabled_sources),
-                enabled_skills=list(enabled_skills),
-                disabled_skills=list(disabled_skills),
-                normalized_remotes=list(normalized_remotes),
-                repo_group_id=repo_group_id,
-                repo_class=repo_class,
-            ),
-            items={},
-        )
-    else:
-        config = corp_candidate.repos[repo_id].config
-        config.repo_class = repo_class
-        config.repo_group_id = repo_group_id
-        config.normalized_remotes = list(normalized_remotes)
-        config.enabled_skills = list(enabled_skills)
-        config.disabled_skills = list(disabled_skills)
-        config.enabled_sources = list(enabled_sources)
-        config.disabled_sources = list(disabled_sources)
-    return resolve_workspace(workspace, machine_config, corp_candidate, user)
-
-
-def simulate_group_resolution(
-    *,
-    workspace: Path,
-    machine_config: MachineConfig,
-    corp: CorpRepo,
-    user: UserLayer,
-    repo_id: str,
-    group_id: str,
-    enabled_skills: list[str],
-    disabled_skills: list[str],
-    enabled_sources: list[str],
-    disabled_sources: list[str],
-    mode: str,
-) -> ResolutionResult:
-    corp_candidate = deepcopy(corp)
-    if mode == "created":
-        corp_candidate.repo_groups[group_id] = LayerData(
-            config=LayerConfig(
-                layer_name="repo-group",
-                layer_path=machine_config.corp_repo_path / "repo-groups" / group_id,
-                identifier=group_id,
-                enabled_sources=list(enabled_sources),
-                disabled_sources=list(disabled_sources),
-                enabled_skills=list(enabled_skills),
-                disabled_skills=list(disabled_skills),
-            ),
-            items={},
-        )
-    else:
-        config = corp_candidate.repo_groups[group_id].config
-        config.enabled_skills = list(enabled_skills)
-        config.disabled_skills = list(disabled_skills)
-        config.enabled_sources = list(enabled_sources)
-        config.disabled_sources = list(disabled_sources)
-    corp_candidate.repos[repo_id].config.repo_group_id = group_id
-    return resolve_workspace(workspace, machine_config, corp_candidate, user)
-
-
-def detect_skill_collisions(result: ResolutionResult) -> list[dict[str, object]]:
-    by_slug: dict[str, list] = {}
-    for resolved in result.items.values():
-        if resolved.item.kind != "skill" or not resolved.active:
-            continue
-        by_slug.setdefault(resolved.item.slug, []).append(resolved)
-    collisions: list[dict[str, object]] = []
-    for slug, resolved_items in sorted(by_slug.items()):
-        if len(resolved_items) < 2:
-            continue
-        overlapping_groups: list[list] = []
-        remaining = list(resolved_items)
-        while remaining:
-            current = [remaining.pop(0)]
-            current_tools = normalized_tool_targets(current[0].item)
-            changed = True
-            while changed:
-                changed = False
-                next_remaining = []
-                for candidate in remaining:
-                    candidate_tools = normalized_tool_targets(candidate.item)
-                    if tool_overlap(current_tools, candidate_tools):
-                        current.append(candidate)
-                        current_tools |= candidate_tools
-                        changed = True
-                    else:
-                        next_remaining.append(candidate)
-                remaining = next_remaining
-            overlapping_groups.append(current)
-        for group in overlapping_groups:
-            if len(group) < 2:
-                continue
-            collisions.append(
-                {
-                    "slug": slug,
-                    "items": [
-                        {
-                            "item_id": resolved.item.item_id,
-                            "title": resolved.item.title,
-                            "targets": sorted(normalized_tool_targets(resolved.item)),
-                        }
-                        for resolved in sorted(group, key=lambda value: value.item.item_id)
-                    ],
-                }
-            )
-    return collisions
-
-
-def normalized_tool_targets(item: Item) -> set[str]:
-    known = {"claude", "codex", "cursor"}
-    if not item.target_tools:
-        return set(known)
-    return {tool for tool in item.target_tools if tool in known}
-
-
-def tool_overlap(left: set[str], right: set[str]) -> bool:
-    if not left or not right:
-        return False
-    return bool(left.intersection(right))
-
-
-def format_collision_error(collisions: list[dict[str, object]]) -> str:
-    parts = []
-    for collision in collisions:
-        items = ", ".join(
-            f"{item['item_id']}[{','.join(item['targets']) or 'none'}]"
-            for item in collision["items"]
-        )
-        parts.append(f"slug {collision['slug']}: {items}")
-    return (
-        "Skill emission collisions must be resolved before apply: "
-        + "; ".join(parts)
-        + ". Disable one of the colliding skills at repo scope."
-    )
-
-
-def prompt_collision_losers(collisions: list[dict[str, object]]) -> list[str]:
+def prompt_collision_losers(collisions: list[SkillCollision]) -> list[str]:
     losers: list[str] = []
     for collision in collisions:
         print(f"Collision for slug {collision['slug']}:", file=sys.stderr)
@@ -2341,11 +2038,6 @@ def complete_binding_skill(config_path: Path, binding_path: Path, skill_id: str)
     data["workspace_binding"] = bindings
     write_toml_document(config_path, data)
     return config_path
-
-
-def validate_repo_group_id(repo_group_id: str | None, corp: CorpRepo) -> None:
-    if repo_group_id and repo_group_id not in corp.repo_groups:
-        raise TeamAgentsError(f"Unknown repo-group id: {repo_group_id}")
 
 
 def collect_kind_ids(corp: CorpRepo, kind: str) -> list[str]:

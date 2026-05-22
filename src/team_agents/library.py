@@ -4,10 +4,11 @@ import shutil
 from pathlib import Path
 
 from team_agents.emitters import claude, codex, cursor
-from team_agents.emitters.common import merge_managed_block, resolve_tool_targets, target_included
+from team_agents.emitters.common import merge_managed_block
 from team_agents.errors import ValidationError
 from team_agents.materialization import materialize_path
 from team_agents.models import Item, MachineConfig, SourceRef
+from team_agents.target_emission import build_user_global_emission_plan, target_included
 
 
 def library_root(machine_config: MachineConfig) -> Path:
@@ -48,7 +49,8 @@ def ensure_external_library_checkout(root: Path, source_ref: SourceRef, strategy
 
 def seed_user_global_outputs(machine_config: MachineConfig, user_root: Path, skill_items: list[Item]) -> list[Path]:
     root = seed_library(machine_config, user_root)
-    targets = set(resolve_tool_targets(machine_config.default_tool_target))
+    plan = build_user_global_emission_plan(machine_config)
+    targets = set(plan.targets)
     written: list[Path] = []
     if "claude" in targets:
         written.extend(seed_claude_user_skills(root, skill_items))

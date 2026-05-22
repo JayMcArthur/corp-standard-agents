@@ -502,7 +502,6 @@ class TeamAgentsTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         validate_resolution_json(payload)
         self.assertEqual(payload["matched_repo_id"], None)
-        self.assertNotIn("consumer_safety_warnings", payload)
         self.assertIn("corp.shadowknight.skill.shell-global", payload["enabled_skills"])
         self.assertIn("user.local.skill.personal-shell", payload["enabled_skills"])
         shell = payload["items"]["corp.shadowknight.skill.shell-global"]
@@ -517,7 +516,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(shell["target_outputs"], ["claude", "codex", "cursor"])
         self.assertEqual(shell["privacy_status"], "repo-safe")
 
-    def test_context_for_harness_outputs_structured_constraints_without_orchestration(self) -> None:
+    def test_context_outputs_profile_playbook_and_evidence_metadata(self) -> None:
         write(
             self.corp_repo / "org" / "profiles" / "runner.toml",
             """
@@ -572,115 +571,20 @@ class TeamAgentsTests(unittest.TestCase):
         stdout = StringIO()
         stderr = StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-harness", "--json"])
+            exit_code = main(["context", "--workspace", str(self.internal_repo), "--profile", "runner", "--pretty"])
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["kind"], "harness-context")
-        self.assertIn("no task runner", payload["non_goals"])
-        self.assertEqual(payload["workspace"]["profile"], "runner")
-        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", payload["required_completion_gates"])
-        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", payload["evidence_requirements"])
-        self.assertIn("corp.shadowknight.playbook.prep-before-code", payload["active_playbooks"])
-        profile_stop_conditions = payload["stop_condition_sources"]["profiles"][0]
-        self.assertEqual(profile_stop_conditions["profile"], "runner")
+        self.assertEqual(payload["profile"], "runner")
+        self.assertIn("corp.shadowknight.completion_gate.definition-of-done", payload["active_completion_gates"])
+        completion_gate = payload["items"]["corp.shadowknight.completion_gate.definition-of-done"]
+        self.assertEqual(completion_gate["evidence_required"], ["tests_run", "risk_notes"])
+        playbook = payload["items"]["corp.shadowknight.playbook.prep-before-code"]
+        self.assertEqual(playbook["inputs"], ["task_request", "repo_context"])
+        self.assertEqual(playbook["outputs"], ["implementation_plan", "verification_plan"])
+        self.assertIn("ambiguous_requirement", playbook["stop_conditions"])
+        profile_stop_conditions = payload["selected_profile_configs"][0]
+        self.assertEqual(profile_stop_conditions["id"], "runner")
         self.assertEqual(profile_stop_conditions["stop_conditions"], ["secrets_detected"])
-        self.assertIn("secrets_detected", payload["stop_conditions"])
-
-    def test_context_rejects_multiple_consumer_views(self) -> None:
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(
-                ["context", "--workspace", str(self.internal_repo), "--for-harness", "--for-workflow-engine", "--json"]
-            )
-        self.assertEqual(exit_code, 2)
-        self.assertIn("choose only one consumer view", stderr.getvalue())
-
-    def test_context_for_workflow_engine_exposes_flows_contracts_and_profile_selection(self) -> None:
-        write(
-            self.corp_repo / "org" / "profiles" / "workflow-review.toml",
-            """
-            id = "workflow-review"
-            stop_conditions = ["external_system_unavailable"]
-
-            [activation]
-            required = ["corp.shadowknight.completion_gate.workflow-done"]
-            enabled = ["corp.shadowknight.playbook.workflow-review"]
-            """,
-        )
-        write(
-            self.corp_repo / "org" / "completion_gates" / "workflow-done" / "item.toml",
-            """
-            id = "corp.shadowknight.completion_gate.workflow-done"
-            kind = "completion_gate"
-            title = "Workflow Done"
-            privacy = "repo-safe"
-            owner = "platform"
-            evidence_required = ["approval_record", "verification_result"]
-            """,
-        )
-        write(self.corp_repo / "org" / "completion_gates" / "workflow-done" / "body.md", "Workflow completion gate.")
-        write(
-            self.corp_repo / "org" / "playbooks" / "workflow-review" / "item.toml",
-            """
-            id = "corp.shadowknight.playbook.workflow-review"
-            kind = "playbook"
-            title = "Workflow Review"
-            privacy = "repo-safe"
-            owner = "workflow-team"
-            inputs = ["pull_request", "policy_context"]
-            outputs = ["review_decision", "evidence_package"]
-            evidence_required = ["review_decision"]
-            stop_conditions = ["missing_policy_context"]
-            """,
-        )
-        write(self.corp_repo / "org" / "playbooks" / "workflow-review" / "body.md", "Review workflow.")
-        write(
-            self.corp_repo / "org" / "config.toml",
-            """
-            id = "shadowknight"
-            enabled_sources = ["shared-ext"]
-            enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            allowed_profiles = ["workflow-review"]
-            default_profile = "workflow-review"
-            recommended_agent_types = ["shell"]
-            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            protected_fields = ["baseline_policies", "privacy_rules"]
-            """,
-        )
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(
-                [
-                    "context",
-                    "--workspace",
-                    str(self.internal_repo),
-                    "--profile",
-                    "workflow-review",
-                    "--for-workflow-engine",
-                    "--json",
-                ]
-            )
-        self.assertEqual(exit_code, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["kind"], "workflow-engine-context")
-        self.assertIn("no workflow execution", payload["runtime_boundary"]["non_goals"])
-        self.assertIn("workflow graph", payload["runtime_boundary"]["workflow_engine_provides"])
-        self.assertEqual(payload["workspace"]["profile"], "workflow-review")
-        completion_gate = payload["active_completion_gates"]["corp.shadowknight.completion_gate.workflow-done"]
-        self.assertEqual(completion_gate["owner"], "platform")
-        self.assertEqual(completion_gate["evidence_required"], ["approval_record", "verification_result"])
-        playbook = payload["playbooks"]["corp.shadowknight.playbook.workflow-review"]
-        self.assertEqual(playbook["owner"], "workflow-team")
-        self.assertEqual(playbook["inputs"], ["pull_request", "policy_context"])
-        self.assertEqual(playbook["outputs"], ["review_decision", "evidence_package"])
-        self.assertIn("missing_policy_context", payload["stop_conditions"])
-        self.assertIn("external_system_unavailable", payload["stop_conditions"])
-        self.assertIn("corp.shadowknight.playbook.workflow-review", payload["evidence_requirements"])
 
     def test_validate_json_reports_governance_status_for_ci(self) -> None:
         self.configure_machine()
@@ -837,7 +741,7 @@ class TeamAgentsTests(unittest.TestCase):
             owner = "platform-enablement"
             status = "active"
             review_status = "approved"
-            intended_consumers = ["human", "harness"]
+            intended_consumers = ["human", "codex"]
             context_quality_max_active_items = 12
             """,
         )
@@ -853,7 +757,7 @@ class TeamAgentsTests(unittest.TestCase):
         self.assertEqual(profile["id"], "maintainer")
         self.assertEqual(profile["kind"], "profile")
         self.assertEqual(profile["review_status"], "approved")
-        self.assertEqual(profile["intended_consumers"], ["human", "harness"])
+        self.assertEqual(profile["intended_consumers"], ["human", "codex"])
         self.assertEqual(profile["context_quality_max_active_items"], 12)
 
     def test_audit_sprawl_warnings_cover_duplicate_pack_activation_and_deprecated_active_items(self) -> None:
@@ -1929,50 +1833,6 @@ class TeamAgentsTests(unittest.TestCase):
         deprecated_check = next(check for check in report["checks"] if check["name"] == "deprecated-active-items")
         self.assertEqual(deprecated_check["status"], "warn")
         self.assertIn("corp.shadowknight.skill.shell-global", deprecated_check["detail"])
-
-    def test_high_risk_intended_consumers_warn_without_safety_metadata(self) -> None:
-        write(
-            self.corp_repo / "org" / "config.toml",
-            """
-            id = "shadowknight"
-            enabled_sources = ["shared-ext"]
-            enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            baseline_policies = ["corp.shadowknight.policy.no-leaks"]
-            default_profile = "runner"
-            recommended_agent_types = ["shell"]
-            minimal_enabled_skills = ["corp.shadowknight.skill.shell-global"]
-            protected_fields = ["baseline_policies", "privacy_rules"]
-            """,
-        )
-        write(
-            self.corp_repo / "org" / "profiles" / "runner.toml",
-            """
-            id = "runner"
-            title = "Runner"
-            intended_consumers = ["harness", "workflow-engine"]
-
-            [activation]
-            enabled = ["corp.shadowknight.skill.shell-global"]
-            """,
-        )
-        self.configure_machine()
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["doctor", "--workspace", str(self.internal_repo), "--json"])
-        self.assertEqual(exit_code, 0)
-        report = json.loads(stdout.getvalue())
-        codes = {warning["code"] for warning in report["consumer_safety_warnings"]}
-        self.assertIn("missing-consumer-stop-conditions", codes)
-
-        stdout = StringIO()
-        stderr = StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = main(["context", "--workspace", str(self.internal_repo), "--for-harness", "--json"])
-        self.assertEqual(exit_code, 0)
-        payload = json.loads(stdout.getvalue())
-        context_codes = {warning["code"] for warning in payload["consumer_safety_warnings"]}
-        self.assertEqual(codes, context_codes)
 
     def test_doctor_warns_when_profile_active_item_threshold_is_exceeded(self) -> None:
         org_config = self.corp_repo / "org" / "config.toml"

@@ -17,15 +17,12 @@ class FrozenV1SpecsTests(unittest.TestCase):
             "materialization-config.md",
             "resolution-output.md",
             "agents-md-contract.md",
-            "harness-integration-contract.md",
-            "workflow-engine-integration-contract.md",
             "ci-governance-command-surface.md",
             "produced-artifact-manifest.md",
             "resolution-json.schema.json",
             "emitter-collision-rules.md",
             "canonical-id.md",
             "trust-and-pin-model.md",
-            "episode-evidence-package.md",
         ]:
             with self.subTest(name=name):
                 path = ROOT / "docs" / "specs" / "v1" / name
@@ -70,6 +67,5 @@ class FrozenV1SpecsTests(unittest.TestCase):
             "test_resolution_json_contract.py",
             "test_tool_router_collisions_contract.py",
             "test_trust_model_contract.py",
-            "test_episode_evidence_package_contract.py",
         ]:
             self.assertIn(name, contract_tests)

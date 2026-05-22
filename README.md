@@ -196,18 +196,17 @@ team-agents validate --workspace /path/to/repo --json
 
 `doctor` checks resolution health, profile safety metadata, generated artifact risks, source trust, and common context-quality problems. Run it before `sync`, before committing generated files, and when a workspace does not receive the expected standards.
 
-## Integration Views
+## Integration
 
-`team-agents` is not an orchestrator, harness, task runner, swarm runtime, CRM, inbox automation system, or background workflow engine. It supplies standards, context, provenance, validation, and target-specific rendering.
+`team-agents` is not an orchestrator, task runner, swarm runtime, CRM, inbox automation system, or background workflow engine. It supplies standards, context, provenance, validation, and target-specific rendering.
 
-External runtimes can request narrowed context views:
+External tools should consume the canonical resolution JSON and adapt it in their own code:
 
 ```bash
-team-agents context --workspace /path/to/repo --for-harness --json
-team-agents context --workspace /path/to/repo --profile reviewer --for-workflow-engine --json
+team-agents context --workspace /path/to/repo --profile reviewer --json
 ```
 
-Those views describe constraints and selected context. Runtime execution, scheduling, permissions, task state, handoffs, and intervention logs belong to the consuming runtime.
+The resolution JSON describes selected standards, provenance, privacy status, target outputs, warnings, and denied items. Runtime execution, scheduling, permissions, task state, handoffs, and intervention logs belong outside this repo.
 
 ## Repo Shape
 

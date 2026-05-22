@@ -5,26 +5,11 @@ from pathlib import Path
 
 from team_agents.errors import ResolutionError
 from team_agents.models import Item, ResolutionResult
+from team_agents.target_emission import target_included
 
 
 MANAGED_START = "<!-- team-agents:start -->"
 MANAGED_END = "<!-- team-agents:end -->"
-TARGETS = ("codex", "claude", "cursor")
-
-
-def resolve_tool_targets(default_tool_target: str) -> list[str]:
-    if default_tool_target == "all":
-        return list(TARGETS)
-    if default_tool_target in TARGETS:
-        return [default_tool_target]
-    raise ResolutionError(f"Unsupported tool target {default_tool_target!r}")
-
-
-def target_included(item: Item, target: str) -> bool:
-    settings = item.target_settings.get(target)
-    if settings is not None:
-        return settings.include
-    return not item.target_tools or target in item.target_tools
 
 
 def split_frontmatter(body: str) -> tuple[dict[str, str], str]:

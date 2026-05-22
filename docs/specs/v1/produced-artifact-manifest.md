@@ -1,6 +1,6 @@
 # Produced Artifact Manifest v1
 
-`team-agents sync` writes `.agents/artifacts.json` so humans, CI, harnesses, workflow engines, and downstream tooling can inspect which files were generated and what each file is for.
+`team-agents sync` writes `.agents/artifacts.json` so humans, CI, editors, governance checks, and downstream tooling can inspect which files were generated and what each file is for.
 
 Top-level fields:
 
